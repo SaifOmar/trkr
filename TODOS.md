@@ -8,11 +8,16 @@
 5. end a session [x]
 6. save session data  [x]
 7. save sessions []
-8. take cli args []
+8. take cli args [x]
 9. filter system processes out and show user processes only []
 10. allow user to chose and specify what to track []
 11. generate a report []
 12. abstract the platform layer []
+13. make a detection loop that runs every 500ms * 4 [x]
+14. make a poll for /proc/{pid}/stat that runs every 500ms [x]
+15. make the main thread handle spwaning threads and saving to db [x]
+
+
 
 
 ## Questions

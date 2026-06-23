@@ -22,6 +22,11 @@ type process struct {
 	startTime time.Time
 }
 
+type SessionEvent struct {
+	session   *Session
+	eventType string // start, end, pause, resume
+}
+
 type Session struct {
 	StartTime time.Time
 	EndTime   time.Time
@@ -29,6 +34,13 @@ type Session struct {
 
 	proc *process
 }
+
+const (
+	START  = "start"
+	END    = "end"
+	PAUSE  = "pause"
+	RESUME = "resume"
+)
 
 func getBootTime() (int64, error) {
 	data, err := os.ReadFile("/proc/stat")
@@ -47,8 +59,8 @@ func getBootTime() (int64, error) {
 	return 0, fmt.Errorf("btime not found")
 }
 
-func getStartTime(pid int, proc *process) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+func getStartTime(proc *process) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.pid))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -87,9 +99,37 @@ func pollProcStat(pid int) error {
 	return nil
 }
 
+func watchProc(wC chan *SessionEvent, pr *process) {
+	getStartTime(pr)
+	ses := startSession(pr, pr.startTime)
+	event := &SessionEvent{session: ses, eventType: START}
+	wC <- event
+	for {
+		err := pollProcStat(pr.pid)
+		if err != nil {
+			if os.IsNotExist(err) {
+				ses.EndTime = time.Now()
+				ses.Duration = ses.EndTime.Sub(ses.StartTime)
+				event.eventType = END
+				wC <- event
+				return
+			} else {
+				panic("An unexpected error occurred")
+			}
+		}
+		time.Sleep(loopInterval)
+	}
+}
+
+func pollToChan(ch chan []*process) {
+	for {
+		ch <- pollProc()
+		time.Sleep(loopInterval * 4)
+	}
+}
+
 func pollProc() []*process {
 	var myProcessies []*process
-
 	err := filepath.WalkDir("/proc/", func(path string, d os.DirEntry, err error) error {
 		if strings.HasSuffix(path, "status") {
 			parts := strings.Split(path, "/")
@@ -156,50 +196,44 @@ func main() {
 	db := InitDb(cwd + "/trkr.db")
 	defer db.conn.Close()
 
-	var pid int
-	var procs []*process
-	var ses *Session
+	procsChan := make(chan []*process)
+	sessionEventsChan := make(chan *SessionEvent)
+	dedup := make(map[string]*process)
+
+	go pollToChan(procsChan)
+
 	for {
-		if pid == 0 {
-			procs = pollProc()
-			if len(procs) == 0 {
-				fmt.Println("exiting due to 0")
-				os.Exit(0)
-				return
-			}
-			var pr *process
-			for _, p := range procs {
-				if p.name == UserProc {
-					pr = p
-					break
+		select {
+		case procs := <-procsChan:
+			for _, pr := range procs {
+				if pr.name == UserProc {
+					if _, ok := dedup[pr.name]; ok {
+						continue
+					}
+					dedup[pr.name] = pr
+					go watchProc(sessionEventsChan, pr)
 				}
 			}
-			if pr == nil {
-				continue
-			}
-			pid = pr.pid
-			getStartTime(pr.pid, pr)
-			SaveProcessDb(pr, db)
-			ses = startSession(pr, pr.startTime)
-		}
-
-		err := pollProcStat(pid)
-
-		if err != nil {
-			if os.IsNotExist(err) {
-				ses.EndTime = time.Now()
-				ses.Duration = ses.EndTime.Sub(ses.StartTime)
-				SaveSessionDb(ses, db)
+		case event := <-sessionEventsChan:
+			switch event.eventType {
+			case START:
+				SaveProcessDb(event.session.proc, db)
+				fmt.Printf(
+					"Session started for %s: \n,%8s → %8s (%s)\n",
+					event.session.StartTime.Format("15:04:05"),
+					event.session.EndTime.Format("15:04:05"),
+					event.session.Duration.Round(time.Second),
+					event.session.proc.name,
+				)
+			case END:
+				SaveSessionDb(event.session, db)
 				fmt.Printf(
 					"%8s → %8s (%s)\n",
-					ses.StartTime.Format("15:04:05"),
-					ses.EndTime.Format("15:04:05"),
-					ses.Duration.Round(time.Second),
+					event.session.StartTime.Format("15:04:05"),
+					event.session.EndTime.Format("15:04:05"),
+					event.session.Duration.Round(time.Second),
 				)
-				os.Exit(0)
-				return
-			} else {
-				panic("An unexpected error occurred")
+				delete(dedup, event.session.proc.name)
 			}
 		}
 		time.Sleep(loopInterval)

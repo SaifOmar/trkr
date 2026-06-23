@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     start_time TEXT,
     end_time TEXT,
     duration_seconds INTEGER,
-    FOREIGN KEY(process_pid) REFERENCES processes(pid)
+    FOREIGN KEY(process_id) REFERENCES processes(id)
 )
 `)
 	if err != nil {
