@@ -233,6 +233,7 @@ func main() {
 	go pollToChan(procsChan)
 
 	wathcing := []string{"zed-editor", "aether", UserProc}
+
 	for {
 		select {
 		case procs := <-procsChan:
