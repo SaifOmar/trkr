@@ -42,6 +42,36 @@ const (
 	RESUME = "resume"
 )
 
+// it poll all procs (/proc) then filters them out to find the root process
+func findRootProcess(name string, procs []*process) *process {
+	var candidates []*process
+	for _, proc := range procs {
+		if strings.Contains(proc.name, name) {
+			candidates = append(candidates, proc)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+
+	parentPids := make(map[int]int) // pid -> how many times it appears as a ppid
+	for _, c := range candidates {
+		parentPids[c.ppid]++
+	}
+
+	for _, c := range candidates {
+		if parentPids[c.pid] > 0 {
+			return c
+		}
+	}
+
+	return candidates[0] // fallback
+}
+
 func getBootTime() (int64, error) {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {
@@ -59,11 +89,10 @@ func getBootTime() (int64, error) {
 	return 0, fmt.Errorf("btime not found")
 }
 
-func getStartTime(proc *process) {
+func getStartTime(proc *process) error {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.pid))
 	if err != nil {
-		fmt.Println(err)
-		return
+		return err
 	}
 	content := bytes.Split(data, []byte{')'})[1]
 	fields := bytes.Fields(content)
@@ -71,14 +100,13 @@ func getStartTime(proc *process) {
 		if i == 19 {
 			bootTime, err := getBootTime()
 			if err != nil {
-				fmt.Println(err)
-				return
+				return err
 			}
 			startTicks, _ := strconv.ParseInt(string(fields[19]), 10, 64) // I don't know what is this
 			proc.startTime = time.Unix(bootTime+startTicks/100, (startTicks%100)*10_000_000)
-			return
 		}
 	}
+	return nil
 }
 
 func startSession(proc *process, t time.Time) *Session {
@@ -91,6 +119,7 @@ func startSession(proc *process, t time.Time) *Session {
 func pollProcStat(pid int) error {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 	if len(data) == 0 {
@@ -100,31 +129,27 @@ func pollProcStat(pid int) error {
 }
 
 func watchProc(wC chan *SessionEvent, pr *process) {
-	getStartTime(pr)
+	err := getStartTime(pr)
+	if err != nil {
+		pr.startTime = time.Now()
+	}
 	ses := startSession(pr, pr.startTime)
-	event := &SessionEvent{session: ses, eventType: START}
-	wC <- event
+	wC <- &SessionEvent{session: ses, eventType: START}
 	for {
 		err := pollProcStat(pr.pid)
 		if err != nil {
-			if os.IsNotExist(err) {
-				ses.EndTime = time.Now()
-				ses.Duration = ses.EndTime.Sub(ses.StartTime)
-				event.eventType = END
-				wC <- event
-				return
-			} else {
-				panic("An unexpected error occurred")
-			}
+			ses.EndTime = time.Now()
+			ses.Duration = ses.EndTime.Sub(ses.StartTime)
+			wC <- &SessionEvent{session: ses, eventType: END}
+			return
 		}
-		time.Sleep(loopInterval)
 	}
 }
 
 func pollToChan(ch chan []*process) {
 	for {
 		ch <- pollProc()
-		time.Sleep(loopInterval * 4)
+		time.Sleep(loopInterval)
 	}
 }
 
@@ -166,7 +191,6 @@ func pollProc() []*process {
 					}
 				}
 			}
-
 		}
 		return nil
 	})
@@ -186,6 +210,12 @@ func main() {
 		return
 	}
 
+	if len(os.Args) < 2 {
+		fmt.Println("Error: Please provide a process name to monitor")
+		os.Exit(0)
+		return
+	}
+
 	UserProc := os.Args[1]
 	if UserProc == "" {
 		fmt.Println("no process name specified")
@@ -198,20 +228,24 @@ func main() {
 
 	procsChan := make(chan []*process)
 	sessionEventsChan := make(chan *SessionEvent)
-	dedup := make(map[string]*process)
+	dedup := make(map[int]bool)
 
 	go pollToChan(procsChan)
 
+	wathcing := []string{"zed-editor", "aether", UserProc}
 	for {
 		select {
 		case procs := <-procsChan:
-			for _, pr := range procs {
-				if pr.name == UserProc {
-					if _, ok := dedup[pr.name]; ok {
+			for _, wi := range wathcing {
+				root := findRootProcess(wi, procs)
+				if root != nil {
+					if _, ok := dedup[root.pid]; ok {
 						continue
 					}
-					dedup[pr.name] = pr
-					go watchProc(sessionEventsChan, pr)
+					dedup[root.pid] = true
+					go watchProc(sessionEventsChan, root)
+				} else {
+					fmt.Printf("Could not find root process for %s\n", wi)
 				}
 			}
 		case event := <-sessionEventsChan:
@@ -219,11 +253,9 @@ func main() {
 			case START:
 				SaveProcessDb(event.session.proc, db)
 				fmt.Printf(
-					"Session started for %s: \n,%8s → %8s (%s)\n",
-					event.session.StartTime.Format("15:04:05"),
-					event.session.EndTime.Format("15:04:05"),
-					event.session.Duration.Round(time.Second),
+					"Session started for %s, at: (%s)\n",
 					event.session.proc.name,
+					event.session.StartTime.Format("15:04:05"),
 				)
 			case END:
 				SaveSessionDb(event.session, db)
@@ -233,9 +265,8 @@ func main() {
 					event.session.EndTime.Format("15:04:05"),
 					event.session.Duration.Round(time.Second),
 				)
-				delete(dedup, event.session.proc.name)
+				delete(dedup, event.session.proc.pid)
 			}
 		}
-		time.Sleep(loopInterval)
 	}
 }
