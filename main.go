@@ -1,26 +1,20 @@
 package main
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
+	"slices"
 	"time"
 
+	"github.com/SaifOmar/trkr/platform"
 	_ "modernc.org/sqlite"
 )
 
 const loopInterval = time.Millisecond * 500
 
-type process struct {
-	name      string
-	pid       int
-	ppid      int
-	tgid      int
-	startTime time.Time
-}
+var watching []string
 
 type SessionEvent struct {
 	session   *Session
@@ -28,11 +22,12 @@ type SessionEvent struct {
 }
 
 type Session struct {
+	id        int64
 	StartTime time.Time
 	EndTime   time.Time
 	Duration  time.Duration
 
-	proc *process
+	proc *platform.Process
 }
 
 const (
@@ -42,101 +37,75 @@ const (
 	RESUME = "resume"
 )
 
-// it poll all procs (/proc) then filters them out to find the root process
-func findRootProcess(name string, procs []*process) *process {
-	var candidates []*process
-	for _, proc := range procs {
-		if strings.Contains(proc.name, name) {
-			candidates = append(candidates, proc)
-		}
-	}
-
-	if len(candidates) == 0 {
-		return nil
-	}
-	if len(candidates) == 1 {
-		return candidates[0]
-	}
-
-	parentPids := make(map[int]int) // pid -> how many times it appears as a ppid
-	for _, c := range candidates {
-		parentPids[c.ppid]++
-	}
-
-	for _, c := range candidates {
-		if parentPids[c.pid] > 0 {
-			return c
-		}
-	}
-
-	return candidates[0] // fallback
+type Server struct {
+	addr string
+	port string
+	db   *Db
 }
 
-func getBootTime() (int64, error) {
-	data, err := os.ReadFile("/proc/stat")
-	if err != nil {
-		return 0, err
-	}
-	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-		if bytes.HasPrefix(line, []byte("btime")) {
-			fields := bytes.Fields(line)
-			if len(fields) < 2 {
-				return 0, fmt.Errorf("bad btime line")
-			}
-			return strconv.ParseInt(string(fields[1]), 10, 64)
+var myprocs []*platform.Process
+
+// TODO : take a look into this deep seek changed it
+func StartServer(addr, port string, db *Db) *Server {
+	s := &Server{addr: addr, port: port, db: db}
+
+	http.HandleFunc("/api/processes", func(w http.ResponseWriter, r *http.Request) {
+		myprocs = platform.PollProc()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"processes": myprocs})
+	})
+
+	http.HandleFunc("/api/track", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Pid int `json:"pid"`
 		}
-	}
-	return 0, fmt.Errorf("btime not found")
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		// get the index of the process in myprocs with the given pid
+		i := slices.IndexFunc(myprocs, func(p *platform.Process) bool {
+			return p.Pid == req.Pid
+		})
+		if i == -1 {
+			http.Error(w, "process not found", http.StatusNotFound)
+			return
+		}
+
+		watching = append(watching, myprocs[i].Name)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	http.Handle("/", http.FileServer(http.Dir("clients/frontend")))
+
+	go func() {
+		fmt.Println("Starting server on", fmt.Sprintf("%s:%s", addr, port))
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", addr, port), nil); err != nil {
+			fmt.Println("Server error:", err)
+		}
+	}()
+
+	return s
 }
 
-func getStartTime(proc *process) error {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.pid))
-	if err != nil {
-		return err
-	}
-	content := bytes.Split(data, []byte{')'})[1]
-	fields := bytes.Fields(content)
-	for i := range fields {
-		if i == 19 {
-			bootTime, err := getBootTime()
-			if err != nil {
-				return err
-			}
-			startTicks, _ := strconv.ParseInt(string(fields[19]), 10, 64) // I don't know what is this
-			proc.startTime = time.Unix(bootTime+startTicks/100, (startTicks%100)*10_000_000)
-		}
-	}
-	return nil
-}
-
-func startSession(proc *process, t time.Time) *Session {
+func startSession(proc *platform.Process, t time.Time) *Session {
 	return &Session{
 		StartTime: t,
 		proc:      proc,
 	}
 }
 
-func pollProcStat(pid int) error {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+func watchProc(wC chan *SessionEvent, pr *platform.Process) {
+	err := platform.GetStartTime(pr)
 	if err != nil {
-		fmt.Println(err)
-		return err
+		pr.StartTime = time.Now()
 	}
-	if len(data) == 0 {
-		return os.ErrNotExist
-	}
-	return nil
-}
-
-func watchProc(wC chan *SessionEvent, pr *process) {
-	err := getStartTime(pr)
-	if err != nil {
-		pr.startTime = time.Now()
-	}
-	ses := startSession(pr, pr.startTime)
+	ses := startSession(pr, pr.StartTime)
 	wC <- &SessionEvent{session: ses, eventType: START}
 	for {
-		err := pollProcStat(pr.pid)
+		err := platform.PollProcStat(pr.Pid)
 		if err != nil {
 			ses.EndTime = time.Now()
 			ses.Duration = ses.EndTime.Sub(ses.StartTime)
@@ -146,61 +115,11 @@ func watchProc(wC chan *SessionEvent, pr *process) {
 	}
 }
 
-func pollToChan(ch chan []*process) {
+func pollToChan(ch chan []*platform.Process) {
 	for {
-		ch <- pollProc()
+		ch <- platform.PollProc()
 		time.Sleep(loopInterval)
 	}
-}
-
-func pollProc() []*process {
-	var myProcessies []*process
-	err := filepath.WalkDir("/proc/", func(path string, d os.DirEntry, err error) error {
-		if strings.HasSuffix(path, "status") {
-			parts := strings.Split(path, "/")
-			if len(parts) != 4 {
-				return nil
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			lines := strings.SplitSeq(string(data), "\n")
-			for line := range lines {
-				if strings.HasPrefix(line, "Name:") {
-					prc := &process{}
-					prc.name = strings.TrimSpace(strings.Split(line, ":")[1])
-					myProcessies = append(myProcessies, prc)
-				}
-				if strings.HasPrefix(line, "Pid:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						myProcessies[len(myProcessies)-1].pid, _ = strconv.Atoi(fields[1])
-					}
-				}
-				if strings.HasPrefix(line, "PPid:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						myProcessies[len(myProcessies)-1].ppid, _ = strconv.Atoi(fields[1])
-					}
-				}
-				if strings.HasPrefix(line, "Tgid:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						myProcessies[len(myProcessies)-1].tgid, _ = strconv.Atoi(fields[1])
-					}
-				}
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-
-	return myProcessies
 }
 
 func main() {
@@ -225,25 +144,32 @@ func main() {
 
 	db := InitDb(cwd + "/trkr.db")
 	defer db.conn.Close()
+	StartServer("127.0.0.1", "8000", db)
 
-	procsChan := make(chan []*process)
+	procsChan := make(chan []*platform.Process)
 	sessionEventsChan := make(chan *SessionEvent)
 	dedup := make(map[int]bool)
+	deletedDedup := make(map[int]time.Time)
+	dedupThreshhold := time.Second * 5
 
 	go pollToChan(procsChan)
 
-	wathcing := []string{"zed-editor", "aether", UserProc}
-
+	watching = append(watching, UserProc)
 	for {
 		select {
 		case procs := <-procsChan:
-			for _, wi := range wathcing {
-				root := findRootProcess(wi, procs)
+			for _, wi := range watching {
+				root := platform.FindRootProcess(wi, procs)
 				if root != nil {
-					if _, ok := dedup[root.pid]; ok {
+					if _, ok := dedup[root.Pid]; ok {
 						continue
 					}
-					dedup[root.pid] = true
+					if _, ok := deletedDedup[root.Pid]; ok {
+						if time.Since(deletedDedup[root.Pid]) < dedupThreshhold {
+							continue
+						}
+					}
+					dedup[root.Pid] = true
 					go watchProc(sessionEventsChan, root)
 				} else {
 					fmt.Printf("Could not find root process for %s\n", wi)
@@ -253,20 +179,22 @@ func main() {
 			switch event.eventType {
 			case START:
 				SaveProcessDb(event.session.proc, db)
+				SaveSessionDb(event.session, db)
 				fmt.Printf(
 					"Session started for %s, at: (%s)\n",
-					event.session.proc.name,
+					event.session.proc.Name,
 					event.session.StartTime.Format("15:04:05"),
 				)
 			case END:
-				SaveSessionDb(event.session, db)
+				UpdateSessionDb(event.session, db)
+				delete(dedup, event.session.proc.Pid)
+				deletedDedup[event.session.proc.Pid] = time.Now()
 				fmt.Printf(
 					"%8s → %8s (%s)\n",
 					event.session.StartTime.Format("15:04:05"),
 					event.session.EndTime.Format("15:04:05"),
 					event.session.Duration.Round(time.Second),
 				)
-				delete(dedup, event.session.proc.pid)
 			}
 		}
 	}

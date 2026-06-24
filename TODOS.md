@@ -7,17 +7,24 @@
 4. start session tracking a task  [x]
 5. end a session [x]
 6. save session data  [x]
-7. save sessions []
+7. save sessions [x]
 8. take cli args [x]
-9. filter system processes out and show user processes only []
-10. allow user to chose and specify what to track []
-11. generate a report []
-12. abstract the platform layer []
+9. filter system processes out and show user processes only [-]
+10. allow user to chose and specify what to track [-]
+11. generate a report [-]
+12. abstract the platform layer [x]
 13. make a detection loop that runs every 500ms * 4 [x]
 14. make a poll for /proc/{pid}/stat that runs every 500ms [x]
 15. make the main thread handle spwaning threads and saving to db [x]
+16. gracefully handle signal interrupts, faults and other shinnaning []
+17. periodically save session data to db
 
 
+
+
+## Bugs 
+
+1. fix restarting session for Procs that are in the cleaning up process by OS // add a delay [x]
 
 
 ## Questions

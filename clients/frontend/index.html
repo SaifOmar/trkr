@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>trkr</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>trkr</h1>
+      <p class="subtitle">Select a process to track</p>
+    </header>
+
+    <div class="search-wrapper">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+      </svg>
+      <input type="text" id="search" placeholder="Search processes..." autofocus>
+      <kbd id="search-hint">/</kbd>
+    </div>
+
+    <div class="status-bar" id="status-bar">
+      <span id="process-count">0</span> processes running
+    </div>
+
+    <div class="process-list" id="process-list" role="listbox" aria-label="Running processes">
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 2v4M6 10H2M18 10h-4M14 2v4"/>
+          <path d="M6 16a6 6 0 0 1 12 0v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-4Z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        <p>No processes found</p>
+      </div>
+    </div>
+
+    <div class="action-bar" id="action-bar">
+      <div class="selected-info" id="selected-info">
+        <span class="selected-label">Selected:</span>
+        <span class="selected-name" id="selected-name">—</span>
+        <span class="selected-pid" id="selected-pid"></span>
+      </div>
+      <button id="track-btn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+        </svg>
+        Track This
+      </button>
+    </div>
+  </div>
+
+  <div id="snackbar" class="snackbar"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
