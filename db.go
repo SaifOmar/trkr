@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/SaifOmar/trkr/platform"
 	_ "modernc.org/sqlite"
@@ -11,6 +12,51 @@ import (
 
 type Db struct {
 	conn *sql.DB
+}
+
+func GetSessionByPidDb(pid int, db *Db) *Session {
+	sqlStmt := `
+		SELECT id, start_time, end_time, duration_seconds
+		FROM sessions
+		WHERE process_id = ?;
+	`
+
+	var ses Session
+	var startTime string
+	var endTime string
+
+	row := db.conn.QueryRow(sqlStmt, pid)
+
+	err := row.Scan(
+		&ses.id,
+		&startTime,
+		&endTime,
+		&ses.Duration,
+	)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	ses.StartTime, err = time.Parse(
+		"2006-01-02 15:04:05",
+		startTime,
+	)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	ses.EndTime, err = time.Parse(
+		"2006-01-02 15:04:05",
+		endTime,
+	)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	return &ses
 }
 
 func SaveProcessDb(proc *platform.Process, db *Db) {

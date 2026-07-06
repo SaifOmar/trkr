@@ -21,7 +21,7 @@ func PollProcStat(pid int) error {
 	return nil
 }
 
-// it poll all procs (/proc) then filters them out to find the root process
+// it polls all procs (/proc) then filters them out to find the root process
 func FindRootProcess(name string, procs []*Process) *Process {
 	var candidates []*Process
 	for _, proc := range procs {
