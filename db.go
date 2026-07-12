@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/SaifOmar/trkr/types"
 	_ "modernc.org/sqlite"
 )
 
@@ -12,24 +13,24 @@ type Db struct {
 	conn *sql.DB
 }
 
-func SaveProcessDb(proc *process, db *Db) {
+func SaveProcessDb(proc *types.Process, db *Db) {
 	sqlStmt := `
 		INSERT INTO processes (name, pid, ppid, tgid, start_time)
 		VALUES (?, ?, ?, ?, ?);
 	`
-	_, err := db.conn.Exec(sqlStmt, proc.name, proc.pid, proc.ppid, proc.tgid, proc.startTime.Format("2006-01-02 15:04:05"))
+	_, err := db.conn.Exec(sqlStmt, proc.Name, proc.Pid, proc.Ppid, proc.Tgid, proc.StartTime.Format("2006-01-02 15:04:05"))
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 }
 
-func SaveSessionDb(ses *Session, db *Db) {
+func SaveSessionDb(ses *types.Session, db *Db) {
 	sqlStmt := `
 		INSERT INTO sessions(process_id, start_time, end_time, duration_seconds)
 		VALUES (?, ?, ?, ?);
 	`
-	_, err := db.conn.Exec(sqlStmt, ses.proc.pid, ses.StartTime.Format("2006-01-02 15:04:05"), ses.EndTime.Format("2006-01-02 15:04:05"), ses.Duration.Seconds())
+	_, err := db.conn.Exec(sqlStmt, ses.Proc.Pid, ses.StartTime.Format("2006-01-02 15:04:05"), ses.EndTime.Format("2006-01-02 15:04:05"), ses.Duration.Seconds())
 	if err != nil {
 		fmt.Println(err)
 		return
