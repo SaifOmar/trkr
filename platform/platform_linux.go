@@ -93,14 +93,14 @@ func PollProc(myProcessies *[]*types.Process) {
 			lines := strings.SplitSeq(string(data), "\n")
 			for line := range lines {
 				if strings.HasPrefix(line, "Name:") {
-					prc := &types.Process{}
+					prc := &types.Process{IsParent: false}
 					prc.Name = strings.TrimSpace(strings.Split(line, ":")[1])
 					*myProcessies = append(*myProcessies, prc)
 				}
 				if strings.HasPrefix(line, "Pid:") {
 					fields := strings.Fields(line)
 					if len(fields) >= 2 {
-
+						(*myProcessies)[len(*myProcessies)-1].Pid, _ = strconv.Atoi(fields[1])
 					}
 				}
 				if strings.HasPrefix(line, "PPid:") {

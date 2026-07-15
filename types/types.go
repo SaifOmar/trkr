@@ -9,6 +9,8 @@ const (
 	RESUME = "resume"
 )
 
+type EventType string
+
 type Process struct {
 	Name      string
 	Pid       int
@@ -18,9 +20,15 @@ type Process struct {
 	IsParent  bool
 }
 
+type Event struct {
+	Type    EventType // start, end, pause, resume
+	Process *Process
+	Time    time.Time
+}
+
 type SessionEvent struct {
 	Session   *Session
-	EventType string // start, end, pause, resume
+	EventType // start, end, pause, resume
 }
 
 type Session struct {
