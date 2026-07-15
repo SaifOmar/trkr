@@ -2,6 +2,8 @@ package trkr
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -19,8 +21,13 @@ type Traker struct {
 	Ticker        *time.Ticker
 	ProcessesChan chan []*types.Process
 	EventChan     chan types.Event
-	WatchList     map[int]types.EventType
+	*WatchList
 	// Store         *store.Store
+}
+
+type WatchList struct {
+	mu      *sync.RWMutex
+	Watched map[int]types.EventType
 }
 
 func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.Ticker) *Traker {
@@ -31,7 +38,7 @@ func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.
 		mu:            &sync.RWMutex{},
 		EventChan:     make(chan types.Event),
 		Procceess:     &[]*types.Process{},
-		WatchList:     make(map[int]types.EventType),
+		WatchList:     &WatchList{mu: &sync.RWMutex{}, Watched: make(map[int]types.EventType)},
 	}
 }
 
@@ -69,9 +76,9 @@ func findRoot(proc *types.Process, processes []*types.Process) *types.Process {
 }
 
 // TODO : should optimize this
-func fillIsParent(processes *[]*types.Process) {
-	for _, proc := range *processes {
-		root := findRoot(proc, *processes)
+func (t *Traker) fillIsParent() {
+	for _, proc := range *t.Procceess {
+		root := findRoot(proc, *t.Procceess)
 		if root == nil {
 			continue
 		}
@@ -82,10 +89,6 @@ func fillIsParent(processes *[]*types.Process) {
 }
 
 func (t *Traker) Run() {
-
-	// TODO : should try to fetch from other places there is not reason to panic really
-	//
-
 	for {
 		select {
 		case <-t.Ticker.C:
@@ -97,56 +100,102 @@ func (t *Traker) Run() {
 	}
 }
 
-// TODO : watch process and send events to the channel on
+// NOTE: watch process and send events to the channel on
 // CLOSE , PAUSE , RESUME, START, etc
+// TODO : PAUSE, RESUME
 func (t *Traker) Watch(proc *types.Process) {
+	sleepAnUnlock := func() {
+		t.mu.Unlock()
+		time.Sleep(time.Second * 2)
+	}
 	for {
 		t.mu.Lock()
-		p := getProcessByPPID(proc.Ppid, *t.Procceess)
-		t.mu.Unlock()
-		if p == nil {
-			t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now()}
-			return
+		// look what was the lastt event for this process
+		val, ok := t.WatchList.Watched[proc.Pid]
+		p := filterbyPid(proc.Pid, t.Procceess)
+		err := platform.GetStartTime(proc)
+		if p != nil {
+			if err != nil {
+				fmt.Println(err)
+			}
+			if !ok {
+				t.WatchList.Watched[proc.Pid] = types.START
+				t.EventChan <- types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
+			}
+		} else {
+			if val != types.END {
+				t.WatchList.Watched[proc.Pid] = types.END
+				t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+			}
+
+		}
+		writeToTestFile(proc)
+		sleepAnUnlock()
+	}
+}
+
+func writeToTestFile(p *types.Process) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fileName := filepath.Join(cwd, "cmd.txt")
+
+	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
+		fmt.Println(err)
+	}
+}
+
+func filterbyPid(pid int, procs *[]*types.Process) *types.Process {
+	var p *types.Process
+	for _, proc := range *procs {
+		if proc.Pid == pid {
+			p = proc
 		}
 	}
+	return p
 }
 
 func (t *Traker) tick() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
 	t.Procceess = &[]*types.Process{}
 	platform.PollProc(t.Procceess)
-	fillIsParent(t.Procceess)
+	t.fillIsParent()
 	snapshot := make([]*types.Process, len(*t.Procceess))
 	copy(snapshot, *t.Procceess)
 	t.ProcessesChan <- snapshot
 
 	saved := t.getSavedProcesses()
 	if len(saved) <= 0 {
-		panic("no saved processes")
-	}
-
-	if len(*t.Procceess) <= 0 {
-		panic("no processes")
+		return
 	}
 
 	for _, proc := range saved {
 		for _, p := range *t.Procceess {
 			if strings.EqualFold(p.Name, proc) {
-				fmt.Println("found", p.Name)
 				if p.IsParent {
-					if t.WatchList[p.Pid] == "" {
-						t.EventChan <- types.Event{Type: types.START, Process: p, Time: time.Now()}
-					} else {
-						continue
+					t.WatchList.mu.Lock()
+					if t.WatchList.Watched[p.Pid] == "" {
+						go t.Watch(p)
 					}
+					t.WatchList.mu.Unlock()
 				}
 			}
 		}
 	}
 }
 
+// TODO : look into the store for this and return the slice
 func (t *Traker) getSavedProcesses() []string {
 	return []string{"firefox", "chrome", "vscode", "nvim", "zed-editor"}
 }

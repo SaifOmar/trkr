@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	// "log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -26,6 +28,8 @@ func main() {
 	)
 
 	t := trkr.New(ctx, processesChan, ticker)
+	// TODO : next
+	// store := store.New()
 
 	platform.PollProc(t.Procceess)
 
@@ -40,20 +44,45 @@ func main() {
 			switch e.Type {
 			case types.START:
 				fmt.Println("starting: ", e.Process.Name)
-				t.WatchList[e.Process.Pid] = e.Type
-				go t.Watch(e.Process)
+				fmt.Println("starting: ", e.Process.Name)
+				writeToTestFile(e.Process)
 			case types.END:
 				fmt.Println("ending: ", e.Process.Name)
-				t.WatchList[e.Process.Pid] = e.Type
+				fmt.Println("ending: ", e.Process.Name)
 				t.Save(e.Process)
+				writeToTestFile(e.Process)
 			}
-		case p := <-t.ProcessesChan:
-			fmt.Println("got new procs", p)
+		case snapshot := <-t.ProcessesChan:
+			// TODO : consume for the server
+			fmt.Println("snapshot: ", snapshot)
+		//
+
 		case <-terminate:
 			fmt.Println("Shutting down...")
 			cancel()
 			os.Exit(1)
 		}
 
+	}
+}
+
+func writeToTestFile(p *types.Process) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fileName := filepath.Join(cwd, "test.txt")
+
+	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
+		fmt.Println(err)
 	}
 }
