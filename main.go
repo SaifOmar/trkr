@@ -3,39 +3,66 @@ package main
 import (
 	"context"
 	"fmt"
-	// "log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/SaifOmar/trkr/platform"
+	"github.com/SaifOmar/trkr/server"
+	"github.com/SaifOmar/trkr/store"
 	"github.com/SaifOmar/trkr/trkr"
 	"github.com/SaifOmar/trkr/types"
-	_ "modernc.org/sqlite"
+	"github.com/subosito/gotenv"
 )
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	processesChan := make(chan []*types.Process)
-	ticker := time.NewTicker(time.Second * 2)
-	terminate := make(chan os.Signal, 1)
+	if err := gotenv.Load(); err != nil {
+		panic(fmt.Sprintf("Error loading .env file: %v", err))
+	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	terminate := make(chan os.Signal, 1)
 	signal.Notify(terminate,
 		syscall.SIGTERM,
 		syscall.SIGINT,
 	)
+	errChan := make(chan error)
+	var activeSessions []*types.Session
 
-	t := trkr.New(ctx, processesChan, ticker)
-	// TODO : next
-	// store := store.New()
+	localStore := store.New(store.Config{}, ctx)
 
-	platform.PollProc(t.Procceess)
+	processesChan := make(chan []*types.Process)
+	ticker := time.NewTicker(time.Second * 2)
+	t := trkr.New(ctx, processesChan, ticker, localStore)
+	done := make(chan struct{})
+	server := server.New(
+		t,
+		localStore,
+		os.Getenv("SUPABASE_URL"),
+		os.Getenv("SUPABASE_PUBLIC_KEY"),
+		os.Getenv("SUPABASE_PRIVATE_KEY"),
+		":45098")
+
+	removeSession := func(sessions []*types.Session, session *types.Session) []*types.Session {
+		for i, s := range sessions {
+			if s.ID == session.ID {
+				return append(sessions[:i], sessions[i+1:]...)
+			}
+		}
+		return sessions
+	}
+
+	go func() {
+		err := server.Start()
+		if err != nil {
+			errChan <- err
+		}
+	}()
 
 	go func() {
 		t.Run()
 		close(terminate)
+		done <- struct{}{}
 	}()
 
 	for {
@@ -43,46 +70,40 @@ func main() {
 		case e := <-t.EventChan:
 			switch e.Type {
 			case types.START:
-				fmt.Println("starting: ", e.Process.Name)
-				fmt.Println("starting: ", e.Process.Name)
-				writeToTestFile(e.Process)
+				session := &types.Session{
+					StartTime: e.Time,
+					ProcessID: e.Process.ID,
+					Proc:      e.Process,
+				}
+				activeSessions = append(activeSessions, session)
+				fmt.Println(activeSessions)
+				server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
+				fmt.Println(server.ActiveSessions)
+				localStore.CreateProcess(e.Process)
+				localStore.CreateSession(session)
 			case types.END:
-				fmt.Println("ending: ", e.Process.Name)
-				fmt.Println("ending: ", e.Process.Name)
-				t.Save(e.Process)
-				writeToTestFile(e.Process)
+				localStore.UpdateSession(localStore.GetSession(e.Process.ID))
+				ses := localStore.GetSession(e.Process.ID)
+				ses.Duration = e.Time.Sub(ses.StartTime)
+				ses.EndTime = &e.Time
+				activeSessions = removeSession(activeSessions, ses)
+				fmt.Println(activeSessions)
+				server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
+				fmt.Println(server.ActiveSessions)
+				localStore.UpdateSession(ses)
 			}
+
 		case snapshot := <-t.ProcessesChan:
 			// TODO : consume for the server
-			fmt.Println("snapshot: ", snapshot)
-		//
+			server.ActiveProcesses = snapshot
 
+		case e := <-errChan:
+			fmt.Println("server error: " + e.Error())
+			cancel()
 		case <-terminate:
 			fmt.Println("Shutting down...")
 			cancel()
-			os.Exit(1)
 		}
 
-	}
-}
-
-func writeToTestFile(p *types.Process) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fileName := filepath.Join(cwd, "test.txt")
-
-	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
-		fmt.Println(err)
 	}
 }

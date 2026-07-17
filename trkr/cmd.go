@@ -2,8 +2,8 @@ package trkr
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	// "os"
+	// "path/filepath"
 	"strings"
 	"sync"
 
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SaifOmar/trkr/platform"
+	"github.com/SaifOmar/trkr/store"
 	"github.com/SaifOmar/trkr/types"
 )
 
@@ -22,7 +23,9 @@ type Traker struct {
 	ProcessesChan chan []*types.Process
 	EventChan     chan types.Event
 	*WatchList
-	// Store         *store.Store
+	AutoWatchList []string
+
+	LocalStore *store.Store
 }
 
 type WatchList struct {
@@ -30,15 +33,16 @@ type WatchList struct {
 	Watched map[int]types.EventType
 }
 
-func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.Ticker) *Traker {
+func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.Ticker, store *store.Store) *Traker {
 	return &Traker{
 		ProcessesChan: processesChan,
 		Ctx:           ctx,
 		Ticker:        ticker,
 		mu:            &sync.RWMutex{},
-		EventChan:     make(chan types.Event),
+		EventChan:     make(chan types.Event, 10),
 		Procceess:     &[]*types.Process{},
 		WatchList:     &WatchList{mu: &sync.RWMutex{}, Watched: make(map[int]types.EventType)},
+		LocalStore:    store,
 	}
 }
 
@@ -89,13 +93,16 @@ func (t *Traker) fillIsParent() {
 }
 
 func (t *Traker) Run() {
+	t.getAutoWatchList()
 	for {
 		select {
 		case <-t.Ticker.C:
 			fmt.Println("tick")
 			t.tick()
 		case <-t.Ctx.Done():
+			t.Ticker.Stop()
 			t.closeAll()
+			return
 		}
 	}
 }
@@ -104,10 +111,6 @@ func (t *Traker) Run() {
 // CLOSE , PAUSE , RESUME, START, etc
 // TODO : PAUSE, RESUME
 func (t *Traker) Watch(proc *types.Process) {
-	sleepAnUnlock := func() {
-		t.mu.Unlock()
-		time.Sleep(time.Second * 2)
-	}
 	for {
 		t.mu.Lock()
 		// look what was the lastt event for this process
@@ -127,33 +130,32 @@ func (t *Traker) Watch(proc *types.Process) {
 				t.WatchList.Watched[proc.Pid] = types.END
 				t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
 			}
-
 		}
-		writeToTestFile(proc)
-		sleepAnUnlock()
+		t.mu.Unlock()
+		time.Sleep(time.Second * 2)
 	}
 }
 
-func writeToTestFile(p *types.Process) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fileName := filepath.Join(cwd, "cmd.txt")
-
-	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
-		fmt.Println(err)
-	}
-}
+// func writeToTestFile(p *types.Process) {
+// 	cwd, err := os.Getwd()
+// 	if err != nil {
+// 		fmt.Println(err)
+// 		return
+// 	}
+//
+// 	fileName := filepath.Join(cwd, "cmd.txt")
+//
+// 	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// 	if err != nil {
+// 		fmt.Println(err)
+// 		return
+// 	}
+// 	defer f.Close()
+//
+// 	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
+// 		fmt.Println(err)
+// 	}
+// }
 
 func filterbyPid(pid int, procs *[]*types.Process) *types.Process {
 	var p *types.Process
@@ -175,12 +177,11 @@ func (t *Traker) tick() {
 	copy(snapshot, *t.Procceess)
 	t.ProcessesChan <- snapshot
 
-	saved := t.getSavedProcesses()
-	if len(saved) <= 0 {
+	if len(t.AutoWatchList) <= 0 {
 		return
 	}
 
-	for _, proc := range saved {
+	for _, proc := range t.AutoWatchList {
 		for _, p := range *t.Procceess {
 			if strings.EqualFold(p.Name, proc) {
 				if p.IsParent {
@@ -196,8 +197,11 @@ func (t *Traker) tick() {
 }
 
 // TODO : look into the store for this and return the slice
-func (t *Traker) getSavedProcesses() []string {
-	return []string{"firefox", "chrome", "vscode", "nvim", "zed-editor"}
+func (t *Traker) getAutoWatchList() {
+	v := t.LocalStore.GetAllAutoWatch()
+	for _, autoWatch := range v {
+		t.AutoWatchList = append(t.AutoWatchList, autoWatch.Name)
+	}
 }
 
 func (t *Traker) Save(p *types.Process) {
@@ -205,6 +209,7 @@ func (t *Traker) Save(p *types.Process) {
 	// defer t.mu.Unlock()
 	// t.Store.Save(p)
 }
+
 func (t *Traker) closeAll() {
 	close(t.EventChan)
 	close(t.ProcessesChan)
@@ -218,4 +223,26 @@ func FilterWithName(name string, procs *[]*types.Process) *types.Process {
 	}
 	return nil
 
+}
+
+func (t *Traker) AddAutoWatch(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, n := range t.AutoWatchList {
+		if strings.EqualFold(n, name) {
+			return
+		}
+	}
+	t.AutoWatchList = append(t.AutoWatchList, name)
+}
+
+func (t *Traker) RemoveAutoWatch(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i, n := range t.AutoWatchList {
+		if strings.EqualFold(n, name) {
+			t.AutoWatchList = append(t.AutoWatchList[:i], t.AutoWatchList[i+1:]...)
+			return
+		}
+	}
 }
