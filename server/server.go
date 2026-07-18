@@ -22,13 +22,14 @@ type Server struct {
 func New(tr *trkr.Traker, store *store.Store, SUPABASE_URL, SUPABASE_PUBLIC_KEY, SUPABASE_PRIVATE_KEY string, port string) *Server {
 	return &Server{
 		tr:                   tr,
-		Server:               &http.Server{Addr: port, Handler: nil},
+		Server:               &http.Server{Addr: ":" + port, Handler: nil},
 		store:                store,
 		SUPABASE_URL:         SUPABASE_URL,
 		SUPABASE_PUBLIC_KEY:  SUPABASE_PUBLIC_KEY,
 		SUPABASE_PRIVATE_KEY: SUPABASE_PRIVATE_KEY,
 	}
 }
+
 func (s *Server) JSONMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,15 +42,18 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/v1/store/processes", s.GetAllProcesses)
 	mux.HandleFunc("GET /api/v1/store/process/{id}", s.GetProcess)
+	mux.HandleFunc("GET /api/v1/store/process", s.QueryProcesses)
+
 	mux.HandleFunc("GET /api/v1/store/sessions", s.GetAllSessions)
 	mux.HandleFunc("GET /api/v1/store/session/{id}", s.GetSession)
-
-	mux.HandleFunc("GET /api/v1/active/sessions", s.GetCurrentSessions)
-	mux.HandleFunc("GET /api/v1/active/processes", s.GetCurrentProcesses)
 
 	mux.HandleFunc("GET /api/v1/store/autowatch", s.GetAutoWatch)
 	mux.HandleFunc("POST /api/v1/store/autowatch", s.CreateAutoWatch)
 	mux.HandleFunc("DELETE /api/v1/store/autowatch/{name}", s.RemoveAutoWatch)
+
+	mux.HandleFunc("GET /api/v1/active/sessions", s.GetActiveSessions)
+	mux.HandleFunc("GET /api/v1/active/processes", s.GetActiveProcesses)
+	mux.HandleFunc("GET /api/v1/active/process", s.QueryActiveProcesses)
 
 	handler := s.JSONMiddleware(mux)
 	s.Server.Handler = handler

@@ -18,6 +18,7 @@ type BaseModel struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 }
+
 type Session struct {
 	BaseModel
 	StartTime time.Time     `json:"start_time"`
@@ -29,12 +30,14 @@ type Session struct {
 
 type Process struct {
 	BaseModel
-	Name      string    `json:"name"`
-	Pid       int       `json:"pid"`
-	Ppid      int       `json:"ppid"`
-	Tgid      int       `json:"tgid"`
-	StartTime time.Time `json:"start_time"`
-	IsParent  bool      `json:"is_parent"`
+	OS         string    `json:"os"`
+	DeviceName string    `json:"device_name"`
+	Name       string    `json:"name"`
+	Pid        int       `json:"pid"`
+	Ppid       int       `json:"ppid"`
+	Tgid       int       `json:"tgid"`
+	StartTime  time.Time `json:"start_time"`
+	IsParent   bool      `json:"is_parent"`
 }
 
 type AutoWatch struct {

@@ -2,8 +2,6 @@ package trkr
 
 import (
 	"fmt"
-	// "os"
-	// "path/filepath"
 	"strings"
 	"sync"
 
@@ -26,6 +24,7 @@ type Traker struct {
 	AutoWatchList []string
 
 	LocalStore *store.Store
+	watchDone  chan struct{}
 }
 
 type WatchList struct {
@@ -43,6 +42,7 @@ func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.
 		Procceess:     &[]*types.Process{},
 		WatchList:     &WatchList{mu: &sync.RWMutex{}, Watched: make(map[int]types.EventType)},
 		LocalStore:    store,
+		watchDone:     make(chan struct{}, 100),
 	}
 }
 
@@ -101,7 +101,8 @@ func (t *Traker) Run() {
 			t.tick()
 		case <-t.Ctx.Done():
 			t.Ticker.Stop()
-			t.closeAll()
+			close(t.ProcessesChan)
+			fmt.Println("returning")
 			return
 		}
 	}
@@ -112,27 +113,32 @@ func (t *Traker) Run() {
 // TODO : PAUSE, RESUME
 func (t *Traker) Watch(proc *types.Process) {
 	for {
-		t.mu.Lock()
-		// look what was the lastt event for this process
-		val, ok := t.WatchList.Watched[proc.Pid]
-		p := filterbyPid(proc.Pid, t.Procceess)
-		err := platform.GetStartTime(proc)
-		if p != nil {
-			if err != nil {
-				fmt.Println(err)
+		select {
+		case <-t.Ctx.Done():
+			return
+		default:
+			t.mu.Lock()
+			// look what was the lastt event for this process
+			val, ok := t.WatchList.Watched[proc.Pid]
+			p := filterbyPid(proc.Pid, t.Procceess)
+			err := platform.GetStartTime(proc)
+			t.mu.Unlock()
+			if p != nil {
+				if err != nil {
+					fmt.Println(err)
+				}
+				if !ok {
+					t.WatchList.Watched[proc.Pid] = types.START
+					t.EventChan <- types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
+				}
+			} else {
+				if val != types.END {
+					t.WatchList.Watched[proc.Pid] = types.END
+					t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+				}
 			}
-			if !ok {
-				t.WatchList.Watched[proc.Pid] = types.START
-				t.EventChan <- types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
-			}
-		} else {
-			if val != types.END {
-				t.WatchList.Watched[proc.Pid] = types.END
-				t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
-			}
+			time.Sleep(time.Second * 2)
 		}
-		t.mu.Unlock()
-		time.Sleep(time.Second * 2)
 	}
 }
 
@@ -204,16 +210,9 @@ func (t *Traker) getAutoWatchList() {
 	}
 }
 
-func (t *Traker) Save(p *types.Process) {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
-	// t.Store.Save(p)
-}
-
-func (t *Traker) closeAll() {
-	close(t.EventChan)
-	close(t.ProcessesChan)
-}
+// func (t *Traker) closeAll() {
+// 	close(t.ProcessesChan)
+// }
 
 func FilterWithName(name string, procs *[]*types.Process) *types.Process {
 	for _, proc := range *procs {

@@ -119,11 +119,20 @@ func (s *Store) GetAllProcess() []*types.Process {
 	return processes
 }
 
-func (s *Store) GetAutoWatch(id uint) *types.AutoWatch {
-	var autoWatch types.AutoWatch
-	s.DB.Where("id = ?", id).First(&autoWatch)
-	return &autoWatch
+func (s *Store) GetAutoWatch(qr any) *types.AutoWatch {
+	switch v := qr.(type) {
+	case uint:
+		var autoWatch types.AutoWatch
+		s.DB.Where("id = ?", v).First(&autoWatch)
+		return &autoWatch
+	case string:
+		var autoWatch types.AutoWatch
+		s.DB.Where("name = ?", v).First(&autoWatch)
+		return &autoWatch
+	}
+	return nil
 }
+
 func (s *Store) DeleteAutoWatch(id uint) {
 	s.DB.Unscoped().Delete(&types.AutoWatch{}, id)
 }
