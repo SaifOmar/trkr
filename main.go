@@ -97,6 +97,7 @@ func main() {
 			errChan <- err
 		}
 	}()
+	fmt.Println("Server is running at http://localhost" + server.Server.Addr)
 
 	go func() {
 		t.Run()

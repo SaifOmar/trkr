@@ -112,32 +112,41 @@ func (t *Traker) Run() {
 // CLOSE , PAUSE , RESUME, START, etc
 // TODO : PAUSE, RESUME
 func (t *Traker) Watch(proc *types.Process) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-t.Ctx.Done():
 			return
-		default:
+
+		case <-ticker.C:
 			t.mu.Lock()
-			// look what was the lastt event for this process
 			val, ok := t.WatchList.Watched[proc.Pid]
 			p := filterbyPid(proc.Pid, t.Procceess)
 			err := platform.GetStartTime(proc)
-			t.mu.Unlock()
+			var ev types.Event
 			if p != nil {
 				if err != nil {
 					fmt.Println(err)
 				}
 				if !ok {
 					t.WatchList.Watched[proc.Pid] = types.START
-					t.EventChan <- types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
+					ev = types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
 				}
-			} else {
-				if val != types.END {
-					t.WatchList.Watched[proc.Pid] = types.END
-					t.EventChan <- types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+			} else if val != types.END {
+				t.WatchList.Watched[proc.Pid] = types.END
+				ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+			}
+			t.mu.Unlock()
+
+			if ev.Type != "" {
+				select {
+				case t.EventChan <- ev:
+				case <-t.Ctx.Done():
+					return
 				}
 			}
-			time.Sleep(time.Second * 2)
 		}
 	}
 }
@@ -175,14 +184,21 @@ func filterbyPid(pid int, procs *[]*types.Process) *types.Process {
 
 func (t *Traker) tick() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.Procceess = &[]*types.Process{}
 	platform.PollProc(t.Procceess)
 	t.fillIsParent()
 	snapshot := make([]*types.Process, len(*t.Procceess))
 	copy(snapshot, *t.Procceess)
-	t.ProcessesChan <- snapshot
+	t.mu.Unlock()
 
+	select {
+	case t.ProcessesChan <- snapshot:
+	case <-t.Ctx.Done():
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if len(t.AutoWatchList) <= 0 {
 		return
 	}

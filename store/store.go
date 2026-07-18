@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/SaifOmar/trkr/types"
+	"github.com/glebarez/sqlite" // pure Go, no cgo
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -44,14 +44,14 @@ func (s *Store) init() {
 	case POSTGRES:
 		db, err := gorm.Open(postgres.Open(fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", s.Host, s.Port, s.User, s.Password, "postgres")), &gorm.Config{})
 		if err != nil {
-			panic("failed to connect database")
+			panic(fmt.Sprintf("failed to connect to postgres database: %v", err))
 		}
 		db.AutoMigrate(&types.Process{}, &types.Session{}, &types.AutoWatch{})
 		s.DB = db
 	default:
 		db, err := gorm.Open(sqlite.Open("test.db"))
 		if err != nil {
-			panic("failed to connect database")
+			panic(fmt.Sprintf("failed to connect to sqlite database: %v", err))
 		}
 		db.AutoMigrate(&types.Process{}, &types.Session{}, &types.AutoWatch{})
 		s.DB = db
