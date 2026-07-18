@@ -1,2 +1,5 @@
-trkr.db
-go.sum
+cmd.txt
+test.txt
+*.exe
+*.db
+.env
