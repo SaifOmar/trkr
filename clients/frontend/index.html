@@ -1,58 +1,231 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>trkr</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="container">
-    <header>
-      <h1>trkr</h1>
-      <p class="subtitle">Select a process to track</p>
-    </header>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title></title>
+        <link href="style.css" rel="stylesheet">
+    </head>
+    <body>
+        <nav>
+            <h1>trkr</h1>
+            <ul id="nav-links">
+                <li><a href="#">Home</a></li>
+                <li><a href="#">About</a></li>
+                <li><a href="#">Contact</a></li>
+            </ul>
+            <button id="menu-toggle" aria-label="Toggle menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </nav>
 
-    <div class="search-wrapper">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-      </svg>
-      <input type="text" id="search" placeholder="Search processes..." autofocus>
-      <kbd id="search-hint">/</kbd>
-    </div>
+        <div class="dashboard">
+            <div class="search-panel">
+                <div class="search-header">
+                    <h2 class="panel-title">Processes</h2>
+                    <span class="process-count">4 running</span>
+                </div>
+                <div class="search-input-wrap">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    <input type="text" id="process-search" placeholder="Filter by name..." autocomplete="off">
+                    <kbd class="search-hint">/</kbd>
+                </div>
+                <div class="process-list" id="process-list">
+                    <div class="process-item selected">
+                        <span class="process-dot" style="background: var(--accent)"></span>
+                        <div class="process-item-info">
+                            <span class="process-item-name">trkr</span>
+                            <span class="process-item-meta">PID 12345 · PPID 1234</span>
+                        </div>
+                        <span class="process-time">3hr 41mins</span>
+                    </div>
+                    <div class="process-item">
+                        <span class="process-dot" style="background: #3fb950"></span>
+                        <div class="process-item-info">
+                            <span class="process-item-name">node</span>
+                            <span class="process-item-meta">PID 8291 · PPID 8200</span>
+                        </div>
+                        <span class="process-time">2hr 12mins</span>
+                    </div>
+                    <div class="process-item">
+                        <span class="process-dot" style="background: #d2a8ff"></span>
+                        <div class="process-item-info">
+                            <span class="process-item-name">alacritty</span>
+                            <span class="process-item-meta">PID 5512 · PPID 5500</span>
+                        </div>
+                        <span class="process-time">1hr 05mins</span>
+                    </div>
+                    <div class="process-item">
+                        <span class="process-dot" style="background: #f0883e"></span>
+                        <div class="process-item-info">
+                            <span class="process-item-name">hyprland</span>
+                            <span class="process-item-meta">PID 1001 · PPID 1000</span>
+                        </div>
+                        <span class="process-time">0hr 43mins</span>
+                    </div>
+                </div>
+            </div>
 
-    <div class="status-bar" id="status-bar">
-      <span id="process-count">0</span> processes running
-    </div>
+            <div class="summary-card">
+                <div class="summary-total">
+                    <span class="summary-label">This Week</span>
+                    <span class="summary-value">17hr 41mins</span>
+                </div>
+                <div class="summary-stats">
+                    <div class="stat-card">
+                        <span class="stat-top">Current Day</span>
+                        <span class="stat-value">3hr 41mins</span>
+                        <span class="stat-bottom">today</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-top">Daily Average</span>
+                        <span class="stat-value">2hr 30mins</span>
+                        <span class="stat-bottom">over 7 days</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-top">Most Active</span>
+                        <span class="stat-value">Wed Jul 15th</span>
+                        <span class="stat-bottom">top day</span>
+                    </div>
+                </div>
+            </div>
 
-    <div class="process-list" id="process-list" role="listbox" aria-label="Running processes">
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10 2v4M6 10H2M18 10h-4M14 2v4"/>
-          <path d="M6 16a6 6 0 0 1 12 0v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-4Z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-        <p>No processes found</p>
-      </div>
-    </div>
+            <div class="dashboard-row">
+                <div class="panel">
+                    <h2 class="panel-title">Projects</h2>
+                    <div class="building-chart">
+                        <div class="building" style="--h: 43%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">3hr 00mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 2hr 14mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #3fb950"></span>web — 0hr 46mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 67%; --color: var(--accent)"></div>
+                                <div class="floor" style="--h: 33%; --color: #3fb950"></div>
+                            </div>
+                            <span class="building-label">Mon</span>
+                        </div>
+                        <div class="building" style="--h: 64%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">4hr 30mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 3hr 05mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #d2a8ff"></span>api — 0hr 52mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #3fb950"></span>web — 0hr 33mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 67%; --color: var(--accent)"></div>
+                                <div class="floor" style="--h: 22%; --color: #d2a8ff"></div>
+                                <div class="floor" style="--h: 11%; --color: #3fb950"></div>
+                            </div>
+                            <span class="building-label">Tue</span>
+                        </div>
+                        <div class="building" style="--h: 100%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">7hr 12mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 4hr 28mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #f0883e"></span>cli — 2hr 05mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #3fb950"></span>web — 0hr 39mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 57%; --color: var(--accent)"></div>
+                                <div class="floor" style="--h: 29%; --color: #f0883e"></div>
+                                <div class="floor" style="--h: 14%; --color: #3fb950"></div>
+                            </div>
+                            <span class="building-label">Wed</span>
+                        </div>
+                        <div class="building" style="--h: 21%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">1hr 30mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 1hr 08mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #f778ba"></span>docs — 0hr 22mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 67%; --color: var(--accent)"></div>
+                                <div class="floor" style="--h: 33%; --color: #f778ba"></div>
+                            </div>
+                            <span class="building-label">Thu</span>
+                        </div>
+                        <div class="building" style="--h: 71%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">5hr 00mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 2hr 17mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #3fb950"></span>web — 1hr 48mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #d2a8ff"></span>api — 0hr 55mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 40%; --color: var(--accent)"></div>
+                                <div class="floor" style="--h: 40%; --color: #3fb950"></div>
+                                <div class="floor" style="--h: 20%; --color: #d2a8ff"></div>
+                            </div>
+                            <span class="building-label">Fri</span>
+                        </div>
+                        <div class="building" style="--h: 14%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">1hr 00mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: var(--accent)"></span>trkr — 1hr 00mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 100%; --color: var(--accent)"></div>
+                            </div>
+                            <span class="building-label">Sat</span>
+                        </div>
+                        <div class="building" style="--h: 21%">
+                            <div class="building-tooltip">
+                                <div class="bt-total">1hr 30mins total</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #3fb950"></span>web — 0hr 58mins</div>
+                                <div class="bt-row"><span class="bt-dot" style="background: #f0883e"></span>cli — 0hr 32mins</div>
+                            </div>
+                            <div class="building-stack">
+                                <div class="floor" style="--h: 67%; --color: #3fb950"></div>
+                                <div class="floor" style="--h: 33%; --color: #f0883e"></div>
+                            </div>
+                            <span class="building-label">Sun</span>
+                        </div>
+                    </div>
+                </div>
 
-    <div class="action-bar" id="action-bar">
-      <div class="selected-info" id="selected-info">
-        <span class="selected-label">Selected:</span>
-        <span class="selected-name" id="selected-name">—</span>
-        <span class="selected-pid" id="selected-pid"></span>
-      </div>
-      <button id="track-btn" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
-        </svg>
-        Track This
-      </button>
-    </div>
-  </div>
-
-  <div id="snackbar" class="snackbar"></div>
-
-  <script src="app.js"></script>
-</body>
+                <div class="panel">
+                    <h2 class="panel-title">Summary</h2>
+                    <div class="machine-content">
+                        <div class="donut-chart">
+                            <div class="donut-ring"></div>
+                            <div class="donut-center">
+                                <span class="donut-value">17hr 41mins</span>
+                                <span class="donut-label">100.00%</span>
+                            </div>
+                        </div>
+                        <div class="machine-info">
+                            <div class="machine-name">saif</div>
+                            <div class="machine-stats">
+                                <div class="machine-stat">
+                                    <span class="ms-value">3hr 41mins Today</span>
+                                    <span class="ms-change positive">32% Increase</span>
+                                </div>
+                                <div class="machine-stat">
+                                    <span class="ms-value">2hr 56mins Daily Average</span>
+                                    <span class="ms-detail">Daily Average 2hr 56mins per day (Over 6 days)</span>
+                                    <span class="ms-detail">2hr 47mins per day (Over previous 5 days excluding 1 day without any activity)</span>
+                                </div>
+                                <div class="machine-stat">
+                                    <span class="ms-value">Wed Jul 15th</span>
+                                    <span class="ms-detail">Most Active Day</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+            document.getElementById('menu-toggle').addEventListener('click', function() {
+                document.getElementById('nav-links').classList.toggle('open');
+                this.classList.toggle('open');
+            });
+        </script>
+    </body>
 </html>
