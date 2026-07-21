@@ -14,6 +14,8 @@ import (
 	"github.com/SaifOmar/trkr/types"
 )
 
+var deviceName = GetDeviceName()
+
 func PollProc(myProcessies *[]*types.Process) {
 	uid := os.Getuid()
 	err := filepath.WalkDir("/proc/", func(path string, d os.DirEntry, err error) error {
@@ -30,7 +32,9 @@ func PollProc(myProcessies *[]*types.Process) {
 				return nil
 			}
 
-			prc := &types.Process{IsParent: false}
+			prc := &types.Process{IsParent: false, DeviceName: deviceName}
+			GetOS(prc)
+
 			matchesUID := false
 
 			lines := strings.SplitSeq(string(data), "\n")
@@ -65,6 +69,7 @@ func PollProc(myProcessies *[]*types.Process) {
 			}
 
 			if matchesUID {
+				GetStartTime(prc)
 				*myProcessies = append(*myProcessies, prc)
 			}
 		}
@@ -98,12 +103,12 @@ func GetOS(proc *types.Process) {
 	proc.OS = "linux"
 }
 
-func GetDeviceName() (string, error) {
+func GetDeviceName() string {
 	name, err := os.Hostname()
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return strings.TrimSpace(name), nil
+	return name
 }
 
 // func pollProcStat(pid int) error {

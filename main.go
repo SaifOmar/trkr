@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -33,13 +34,10 @@ func (s *flagSlise) Set(value string) error {
 	}
 	return nil
 }
-func (s *flagSlise) Read() string {
-	return "string"
-}
+
 func main() {
-	if err := gotenv.Load(); err != nil {
-		panic(fmt.Sprintf("Error loading .env file: %v", err))
-	}
+	// .env is optional — env vars and flags work without it
+	_ = gotenv.Load()
 
 	SUPABASE_URL := flag.String("sb_url", os.Getenv("SUPABASE_URL"), "supabase url")
 	SUPABASE_PUBLIC_KEY := flag.String("sb_pub_key", os.Getenv("SUPABASE_PUBLIC_KEY"), "supabase public key")
@@ -49,6 +47,10 @@ func main() {
 	flag.Var(&WATCH, "watch", "comma separated list of processes to watch")
 
 	flag.Parse()
+
+	if *PORT == "" {
+		*PORT = "45098"
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	terminate := make(chan os.Signal, 1)
@@ -110,6 +112,7 @@ loop:
 		case e := <-t.EventChan:
 			switch e.Type {
 			case types.START:
+				e.Process.Duration = time.Since(e.Process.StartTime)
 				session := &types.Session{
 					StartTime: e.Time,
 					ProcessID: e.Process.ID,
@@ -122,14 +125,28 @@ loop:
 				localStore.CreateProcess(e.Process)
 				localStore.CreateSession(session)
 			case types.END:
-				ses := localStore.GetSession(e.Process.ID)
-				ses.Duration = e.Time.Sub(ses.StartTime)
-				ses.EndTime = &e.Time
-				activeSessions = removeSession(activeSessions, ses)
-				fmt.Println(activeSessions)
-				server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
-				fmt.Println(server.ActiveSessions)
-				localStore.UpdateSession(ses)
+				pid := e.Process.Pid
+				idx := slices.IndexFunc(server.ActiveSessions, func(s *types.Session) bool {
+					return s.Proc.Pid == pid
+				})
+				var ses *types.Session
+				if idx != -1 {
+					ses = server.ActiveSessions[idx]
+					// ses := localStore.GetSessionByProcessID(e.Process.Pid)
+					fmt.Println("ses: ", ses)
+					ses.Duration = e.Time.Sub(ses.StartTime)
+					ses.EndTime = &e.Time
+					activeSessions = removeSession(activeSessions, ses)
+					fmt.Println(activeSessions)
+					server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
+					fmt.Println(server.ActiveSessions)
+					localStore.UpdateSession(ses)
+					proc := localStore.GetProcess(ses.ProcessID)
+					if proc != nil {
+						proc.Duration = e.Time.Sub(proc.StartTime)
+						localStore.UpdateProcess(proc)
+					}
+				}
 			}
 
 		case snapshot := <-t.ProcessesChan:
@@ -153,6 +170,11 @@ loop:
 		ses.EndTime = &e
 		ses.Duration = e.Sub(ses.StartTime)
 		localStore.UpdateSession(ses)
+		proc := localStore.GetProcess(ses.ProcessID)
+		if proc != nil {
+			proc.Duration = e.Sub(proc.StartTime)
+			localStore.UpdateProcess(proc)
+		}
 	}
 
 	debug(t)

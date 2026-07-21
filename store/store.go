@@ -83,9 +83,10 @@ func (s *Store) GetProcess(id uint) *types.Process {
 }
 func (s *Store) GetSession(id uint) *types.Session {
 	var session types.Session
-	s.DB.Where("id = ?", id).First(&session)
+	s.DB.Preload("Proc").Where("id = ?", id).First(&session)
 	return &session
 }
+
 func (s *Store) GetSessions(processID uint) []*types.Session {
 	var sessions []*types.Session
 	s.DB.Where("process_id = ?", processID).Find(&sessions)
@@ -109,7 +110,7 @@ func (s *Store) DeleteProcess(id uint) {
 
 func (s *Store) GetAllSession() []*types.Session {
 	var sessions []*types.Session
-	s.DB.Find(&sessions)
+	s.DB.Preload("Proc").Find(&sessions)
 	return sessions
 }
 

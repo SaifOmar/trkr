@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var deviceName = GetDeviceName()
+
 func PollProc(processes *[]*types.Process) {
 	hwin, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
@@ -29,10 +31,15 @@ func PollProc(processes *[]*types.Process) {
 			panic(err)
 		}
 		name := strings.TrimSuffix(windows.UTF16ToString(ProcessEnetry32.ExeFile[:]), ".exe")
-		*processes = append(*processes, &types.Process{Name: name, Pid: int(ProcessEnetry32.ProcessID), Ppid: int(ProcessEnetry32.ParentProcessID)})
+		p := &types.Process{Name: name, Pid: int(ProcessEnetry32.ProcessID), Ppid: int(ProcessEnetry32.ParentProcessID), DeviceName: deviceName}
+		GetStartTime(p)
+		GetOS(p)
+		*processes = append(*processes, p)
+
 	}
 
 }
+
 func GetStartTime(proc *types.Process) error {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(proc.Pid))
 	if err != nil {
@@ -49,12 +56,12 @@ func GetStartTime(proc *types.Process) error {
 	return nil
 }
 
-func GetDeviceName() (string, error) {
+func GetDeviceName() string {
 	name, err := os.Hostname()
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return strings.TrimSpace(name), nil
+	return name
 }
 
 func GetOS(proc *types.Process) {

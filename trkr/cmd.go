@@ -114,6 +114,7 @@ func (t *Traker) Run() {
 func (t *Traker) Watch(proc *types.Process) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	breaker := false
 
 	for {
 		select {
@@ -125,19 +126,34 @@ func (t *Traker) Watch(proc *types.Process) {
 			val, ok := t.WatchList.Watched[proc.Pid]
 			p := filterbyPid(proc.Pid, t.Procceess)
 			err := platform.GetStartTime(proc)
+
 			var ev types.Event
+
 			if p != nil {
 				if err != nil {
 					fmt.Println(err)
 				}
 				if !ok {
 					t.WatchList.Watched[proc.Pid] = types.START
-					ev = types.Event{Type: types.START, Process: proc, Time: proc.StartTime}
+					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
+				} else {
+					if val == types.END {
+						t.WatchList.Watched[proc.Pid] = ""
+						breaker = true
+					}
 				}
-			} else if val != types.END {
-				t.WatchList.Watched[proc.Pid] = types.END
-				ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+			} else {
+				if val != types.END {
+					t.WatchList.Watched[proc.Pid] = types.END
+					ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
+				}
+				// for clean up so the goroutine doesn't keep running for ever
+				if val == types.END {
+					t.WatchList.Watched[proc.Pid] = ""
+				}
+				breaker = true
 			}
+
 			t.mu.Unlock()
 
 			if ev.Type != "" {
@@ -147,6 +163,11 @@ func (t *Traker) Watch(proc *types.Process) {
 					return
 				}
 			}
+		}
+
+		if breaker {
+			fmt.Println("breaker")
+			return
 		}
 	}
 }
@@ -260,4 +281,55 @@ func (t *Traker) RemoveAutoWatch(name string) {
 			return
 		}
 	}
+}
+func getProcessByPid(pid int, procs *[]*types.Process) *types.Process {
+	for _, proc := range *procs {
+		if proc.Pid == pid {
+			return proc
+		}
+	}
+	return nil
+}
+
+func (t *Traker) StopWatching(pid int) {
+	t.mu.Lock()
+	p := getProcessByPid(pid, t.Procceess)
+	fmt.Printf("found this proc: %+v\n", p)
+	if _, ok := t.WatchList.Watched[pid]; ok {
+		t.WatchList.Watched[pid] = types.END
+		t.EventChan <- types.Event{Type: types.END, Process: p, Time: time.Now().Local()}
+	}
+	t.mu.Unlock()
+}
+
+// func (t *Traker) StopWatchingByName(name string) []*types.Process {
+// 	t.mu.Lock()
+// 	defer t.mu.Unlock()
+//
+// 	var stopped []*types.Process
+// 	for _, proc := range *t.Procceess {
+// 		if strings.EqualFold(proc.Name, name) {
+// 			if _, ok := t.WatchList.Watched[proc.Pid]; ok {
+// 				t.WatchList.Watched[proc.Pid] = types.END
+// 				stopped = append(stopped, proc)
+// 			}
+// 		}
+// 	}
+// 	return stopped
+// }
+
+func (t *Traker) AddManualWatch(pid int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	p := filterbyPid(pid, t.Procceess)
+	if p == nil {
+		return false
+	}
+	t.WatchList.mu.Lock()
+	defer t.WatchList.mu.Unlock()
+	if t.WatchList.Watched[p.Pid] == "" {
+		go t.Watch(p)
+		return true
+	}
+	return false
 }

@@ -3,3 +3,5 @@ test.txt
 *.exe
 *.db
 .env
+node_modules
+bin/

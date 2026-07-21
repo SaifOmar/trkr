@@ -30,14 +30,15 @@ type Session struct {
 
 type Process struct {
 	BaseModel
-	OS         string    `json:"os"`
-	DeviceName string    `json:"device_name"`
-	Name       string    `json:"name"`
-	Pid        int       `json:"pid"`
-	Ppid       int       `json:"ppid"`
-	Tgid       int       `json:"tgid"`
-	StartTime  time.Time `json:"start_time"`
-	IsParent   bool      `json:"is_parent"`
+	OS         string        `json:"os"`
+	DeviceName string        `json:"device_name"`
+	Name       string        `json:"name"`
+	Pid        int           `json:"pid"`
+	Ppid       int           `json:"ppid"`
+	Tgid       int           `json:"tgid"`
+	StartTime  time.Time     `json:"start_time"`
+	IsParent   bool          `json:"is_parent"`
+	Duration   time.Duration `json:"duration"`
 }
 
 type AutoWatch struct {

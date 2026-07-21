@@ -1,12 +1,23 @@
-export CGO_CFLAGS := -Wno-discarded-qualifiers
+BIN_DIR := ./bin
 
-.PHONY: run build clean
+.PHONY: run run-dev build build-windows deploy-windows clean
 
 run:
 	go run .
 
+run-dev:
+	go run -tags dev .
+
 build:
-	go build -o trkr .
+	mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/trkr .
+
+build-windows:
+	mkdir -p $(BIN_DIR)
+	GOOS=windows GOARCH=amd64 go build -o $(BIN_DIR)/trkr.exe .
+
+deploy-windows: build-windows
+	cp $(BIN_DIR)/trkr.exe ~/Windows/
 
 clean:
-	rm -f trkr
+	rm -rf $(BIN_DIR)
