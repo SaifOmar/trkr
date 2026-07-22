@@ -331,6 +331,7 @@ let dashboardTimer = null;
 
 function renderDashboard() {
     renderDashboardProcesses();
+    renderDashboardActiveSessions();
     renderDashboardSummary();
     renderDashboardBuilding();
     renderDashboardDonut();
@@ -776,8 +777,15 @@ function renderHistoryItem(s) {
     const name = s.proc?.name || 'PID ' + s.process_id;
     const c = COLORS[hashCode(name) % COLORS.length];
     
-    const endStr = s.end_time ? fmtTime(s.end_time).split(' ').slice(1).join(' ') : 'Active';
-    const startStr = fmtTime(s.start_time).split(' ').slice(1).join(' ') || '';
+    const isOngoing = !s.end_time;
+    const startStr = fmtTime(s.start_time);
+    const endStr = isOngoing ? 'Active' : fmtTime(s.end_time);
+
+    let trackedNanos = s.duration || 0;
+    if (isOngoing && s.start_time) {
+        const elapsed = Date.now() - new Date(s.start_time).getTime();
+        if (elapsed > 0) trackedNanos = elapsed * 1e6;
+    }
 
     let procRuntimeNanos = 0;
     if (s.proc?.start_time) {
@@ -795,7 +803,7 @@ function renderHistoryItem(s) {
         '</div>' +
         '<span class="history-item-duration">' +
             '<span class="history-item-label">tracked</span>' +
-            '<span>' + fmtDur(s.duration) + '</span>' +
+            '<span class="' + (isOngoing ? 'live-text' : '') + '">' + fmtDur(trackedNanos) + '</span>' +
         '</span>' +
         '<span class="history-item-duration">' +
             '<span class="history-item-label">runtime</span>' +
@@ -809,40 +817,111 @@ function renderHistoryItem(s) {
 // ════════════════════════════════════════
 
 function openDetail(name) {
-    const all = store.get('activeProcesses');
+    const activeProcs = store.get('activeProcesses');
+    const activeSessions = store.get('activeSessions');
     const sessions = store.get('sessions');
-    const p = all.find(p => p.name === name);
+    const autoWatch = store.get('autoWatch');
+
+    // Find process info
+    let p = activeProcs.find(item => item.name === name);
+    if (!p) {
+        const activeSes = activeSessions.find(s => s.proc?.name === name);
+        if (activeSes) p = activeSes.proc;
+    }
+    if (!p) {
+        const ses = sessions.find(s => s.proc?.name === name);
+        if (ses) p = ses.proc;
+    }
+
     const procSessions = sessions.filter(s => (s.proc?.name || 'PID ' + s.process_id) === name);
     const totalDur = procSessions.reduce((a, s) => a + (s.duration || 0), 0);
-    const c = COLORS[hashCode(name) % COLORS.length];
+    const isActive = activeProcs.some(item => item.name === name) || activeSessions.some(s => s.proc?.name === name);
+    const isAutoWatched = autoWatch.some(w => w.name.toLowerCase() === (name || '').toLowerCase());
+    const activeSes = activeSessions.find(s => s.proc?.name === name);
 
     dom.detailTitle.textContent = name;
 
     let html = '<div class="detail-section">' +
         '<div class="detail-section-title">Process Info</div>' +
-        '<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" style="color:' + (p ? 'var(--green)' : 'var(--text-dim)') + '">' + (p ? 'Active' : 'Inactive') + '</span></div>' +
+        '<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" style="color:' + (isActive ? 'var(--green)' : 'var(--text-dim)') + '">' + (isActive ? 'Active' : 'Inactive') + '</span></div>' +
+        (p ? '<div class="detail-row"><span class="detail-label">Device</span><span class="detail-value">' + esc(p.device_name || 'Local') + ' (' + esc(p.os || 'Unknown') + ')</span></div>' : '') +
         (p ? '<div class="detail-row"><span class="detail-label">PID</span><span class="detail-value">' + p.pid + '</span></div>' : '') +
         (p ? '<div class="detail-row"><span class="detail-label">PPID</span><span class="detail-value">' + p.ppid + '</span></div>' : '') +
         '<div class="detail-row"><span class="detail-label">Total Duration</span><span class="detail-value">' + fmtDur(totalDur) + '</span></div>' +
         '<div class="detail-row"><span class="detail-label">Sessions</span><span class="detail-value">' + procSessions.length + '</span></div>' +
         '</div>';
 
+    html += '<div class="detail-section">' +
+        '<div class="detail-section-title">Actions & Watchlist</div>' +
+        '<div class="detail-actions" style="display:flex;gap:8px;flex-wrap:wrap;">';
+
+    if (activeSes) {
+        const pid = activeSes.proc?.pid || 0;
+        const ppid = activeSes.proc?.ppid || 0;
+        html += `<button class="action-btn remove-watch detail-act-stop" data-pid="${pid}" data-ppid="${ppid}" data-name="${esc(name)}">Stop Session</button>`;
+    } else if (p && p.pid) {
+        html += `<button class="action-btn add-watch detail-act-start" data-pid="${p.pid}">Watch Process</button>`;
+    }
+
+    if (isAutoWatched) {
+        html += `<button class="action-btn remove-watch detail-act-unauto" data-name="${esc(name)}">Remove Auto-watch</button>`;
+    } else {
+        html += `<button class="action-btn add-watch detail-act-auto" data-name="${esc(name)}">Add Auto-watch</button>`;
+    }
+    html += '</div></div>';
+
     if (procSessions.length) {
         html += '<div class="detail-section">' +
             '<div class="detail-section-title">Recent Sessions</div>' +
             '<div class="detail-sessions">' +
-            procSessions.sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 20).map(s =>
-                '<div class="detail-session">' +
+            procSessions.sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 20).map(s => {
+                const isOngoing = !s.end_time;
+                let durStr = fmtDur(s.duration);
+                if (isOngoing && s.start_time) {
+                    const elapsed = Date.now() - new Date(s.start_time).getTime();
+                    if (elapsed > 0) durStr = fmtLiveDur(elapsed);
+                }
+                return '<div class="detail-session' + (isOngoing ? ' active-detail-session' : '') + '">' +
                 '<span>' + fmtTime(s.start_time) + '</span>' +
-                '<span>' + fmtDur(s.duration) + '</span>' +
-                '</div>'
-            ).join('') +
+                '<span class="' + (isOngoing ? 'live-text' : '') + '">' + (isOngoing ? 'Active (' + durStr + ')' : durStr) + '</span>' +
+                '</div>';
+            }).join('') +
             '</div></div>';
     }
 
     dom.detailBody.innerHTML = html;
     dom.detailPanel.hidden = false;
     dom.detailPanel.dataset.mode = 'process';
+
+    // Bind action buttons inside detail panel
+    const stopBtn = dom.detailBody.querySelector('.detail-act-stop');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', async () => {
+            await stopActiveSession(parseInt(stopBtn.dataset.pid) || 0, parseInt(stopBtn.dataset.ppid) || 0, name);
+            openDetail(name);
+        });
+    }
+    const startBtn = dom.detailBody.querySelector('.detail-act-start');
+    if (startBtn) {
+        startBtn.addEventListener('click', async () => {
+            await startWatching(parseInt(startBtn.dataset.pid) || 0);
+            openDetail(name);
+        });
+    }
+    const autoBtn = dom.detailBody.querySelector('.detail-act-auto');
+    if (autoBtn) {
+        autoBtn.addEventListener('click', async () => {
+            await addAutoWatch(name);
+            openDetail(name);
+        });
+    }
+    const unautoBtn = dom.detailBody.querySelector('.detail-act-unauto');
+    if (unautoBtn) {
+        unautoBtn.addEventListener('click', async () => {
+            await removeAutoWatch(name);
+            openDetail(name);
+        });
+    }
 }
 
 function closeDetail() {
@@ -905,11 +984,12 @@ if (dom.processSearch) {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
-    if (e.key === '/' && document.activeElement !== dom.processSearch && document.activeElement !== dom.watchlistInput && document.activeElement !== dom.processesSearch) {
+    if (e.key === '/' && document.activeElement !== dom.processSearch && document.activeElement !== dom.watchlistInput && document.activeElement !== dom.processesSearch && document.activeElement !== dom.historySearch) {
         e.preventDefault();
         const view = location.hash || '#dashboard';
         if (view === '#dashboard') dom.processSearch?.focus();
         else if (view === '#processes') dom.processesSearch?.focus();
+        else if (view === '#history') dom.historySearch?.focus();
     }
     if (e.key === 'Escape' && document.activeElement === dom.processSearch) {
         dom.processSearch.value = ''; dom.processSearch.blur(); renderDashboardProcesses();
