@@ -20,16 +20,12 @@ type Traker struct {
 	Ticker        *time.Ticker
 	ProcessesChan chan []*types.Process
 	EventChan     chan types.Event
-	*WatchList
 	AutoWatchList []string
 
+	Stopped    map[int]bool
+	Watched    map[int]types.EventType
 	LocalStore *store.Store
 	watchDone  chan struct{}
-}
-
-type WatchList struct {
-	mu      *sync.RWMutex
-	Watched map[int]types.EventType
 }
 
 func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.Ticker, store *store.Store) *Traker {
@@ -40,8 +36,9 @@ func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.
 		mu:            &sync.RWMutex{},
 		EventChan:     make(chan types.Event, 10),
 		Procceess:     &[]*types.Process{},
-		WatchList:     &WatchList{mu: &sync.RWMutex{}, Watched: make(map[int]types.EventType)},
+		Watched:       make(map[int]types.EventType),
 		LocalStore:    store,
+		Stopped:       make(map[int]bool),
 		watchDone:     make(chan struct{}, 100),
 	}
 }
@@ -123,7 +120,7 @@ func (t *Traker) Watch(proc *types.Process) {
 
 		case <-ticker.C:
 			t.mu.Lock()
-			val, ok := t.WatchList.Watched[proc.Pid]
+			val, ok := t.Watched[proc.Pid]
 			p := filterbyPid(proc.Pid, t.Procceess)
 			err := platform.GetStartTime(proc)
 
@@ -133,23 +130,27 @@ func (t *Traker) Watch(proc *types.Process) {
 				if err != nil {
 					fmt.Println(err)
 				}
+				if t.Stopped[proc.Pid] {
+					t.Watched[proc.Pid] = ""
+					breaker = true
+				}
 				if !ok {
-					t.WatchList.Watched[proc.Pid] = types.START
+					t.Watched[proc.Pid] = types.START
 					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
 				} else {
 					if val == types.END {
-						t.WatchList.Watched[proc.Pid] = ""
+						t.Watched[proc.Pid] = ""
 						breaker = true
 					}
 				}
 			} else {
 				if val != types.END {
-					t.WatchList.Watched[proc.Pid] = types.END
+					t.Watched[proc.Pid] = types.END
 					ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
 				}
 				// for clean up so the goroutine doesn't keep running for ever
 				if val == types.END {
-					t.WatchList.Watched[proc.Pid] = ""
+					t.Watched[proc.Pid] = ""
 				}
 				breaker = true
 			}
@@ -228,11 +229,11 @@ func (t *Traker) tick() {
 		for _, p := range *t.Procceess {
 			if strings.EqualFold(p.Name, proc) {
 				if p.IsParent {
-					t.WatchList.mu.Lock()
-					if t.WatchList.Watched[p.Pid] == "" {
-						go t.Watch(p)
+					if t.Watched[p.Pid] == "" {
+						if !t.Stopped[p.Pid] {
+							go t.Watch(p)
+						}
 					}
-					t.WatchList.mu.Unlock()
 				}
 			}
 		}
@@ -295,8 +296,9 @@ func (t *Traker) StopWatching(pid int) {
 	t.mu.Lock()
 	p := getProcessByPid(pid, t.Procceess)
 	fmt.Printf("found this proc: %+v\n", p)
-	if _, ok := t.WatchList.Watched[pid]; ok {
-		t.WatchList.Watched[pid] = types.END
+	if _, ok := t.Watched[pid]; ok {
+		t.Stopped[pid] = true
+		t.Watched[pid] = types.END
 		t.EventChan <- types.Event{Type: types.END, Process: p, Time: time.Now().Local()}
 	}
 	t.mu.Unlock()
@@ -325,9 +327,7 @@ func (t *Traker) AddManualWatch(pid int) bool {
 	if p == nil {
 		return false
 	}
-	t.WatchList.mu.Lock()
-	defer t.WatchList.mu.Unlock()
-	if t.WatchList.Watched[p.Pid] == "" {
+	if t.Watched[p.Pid] == "" {
 		go t.Watch(p)
 		return true
 	}

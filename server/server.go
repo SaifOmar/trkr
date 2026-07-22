@@ -75,6 +75,8 @@ func (s *Server) Start() error {
 		fs.ServeHTTP(w, r)
 	}))
 
+	registerPprof(mux)
+
 	s.Server.Handler = mux
 	err := s.Server.ListenAndServe()
 	if err != nil {
