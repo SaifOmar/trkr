@@ -25,7 +25,6 @@ type Traker struct {
 	Stopped    map[int]bool
 	Watched    map[int]types.EventType
 	LocalStore *store.Store
-	watchDone  chan struct{}
 }
 
 func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.Ticker, store *store.Store) *Traker {
@@ -39,7 +38,6 @@ func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.
 		Watched:       make(map[int]types.EventType),
 		LocalStore:    store,
 		Stopped:       make(map[int]bool),
-		watchDone:     make(chan struct{}, 100),
 	}
 }
 
@@ -94,12 +92,10 @@ func (t *Traker) Run() {
 	for {
 		select {
 		case <-t.Ticker.C:
-			fmt.Println("tick")
 			t.tick()
 		case <-t.Ctx.Done():
 			t.Ticker.Stop()
 			close(t.ProcessesChan)
-			fmt.Println("returning")
 			return
 		}
 	}
@@ -117,44 +113,39 @@ func (t *Traker) Watch(proc *types.Process) {
 		select {
 		case <-t.Ctx.Done():
 			return
-
 		case <-ticker.C:
 			t.mu.Lock()
 			val, ok := t.Watched[proc.Pid]
 			p := filterbyPid(proc.Pid, t.Procceess)
-			err := platform.GetStartTime(proc)
 
 			var ev types.Event
 
 			if p != nil {
-				if err != nil {
-					fmt.Println(err)
-				}
-				if t.Stopped[proc.Pid] {
-					t.Watched[proc.Pid] = ""
+				switch {
+				case t.Stopped[proc.Pid]:
+					delete(t.Watched, proc.Pid)
 					breaker = true
-				}
-				if !ok {
+				case !ok:
 					t.Watched[proc.Pid] = types.START
 					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
-				} else {
-					if val == types.END {
-						t.Watched[proc.Pid] = ""
-						breaker = true
-					}
+				case val == types.END:
+					delete(t.Watched, proc.Pid)
+					breaker = true
+				case val == types.START:
+					t.Watched[proc.Pid] = types.RUNNING
+					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
+
 				}
 			} else {
-				if val != types.END {
+				switch val {
+				case types.END:
+					delete(t.Watched, proc.Pid)
+				default:
 					t.Watched[proc.Pid] = types.END
 					ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
 				}
-				// for clean up so the goroutine doesn't keep running for ever
-				if val == types.END {
-					t.Watched[proc.Pid] = ""
-				}
 				breaker = true
 			}
-
 			t.mu.Unlock()
 
 			if ev.Type != "" {
@@ -165,9 +156,8 @@ func (t *Traker) Watch(proc *types.Process) {
 				}
 			}
 		}
-
 		if breaker {
-			fmt.Println("breaker")
+			fmt.Println("Watcher goroutine is done")
 			return
 		}
 	}
@@ -229,8 +219,9 @@ func (t *Traker) tick() {
 		for _, p := range *t.Procceess {
 			if strings.EqualFold(p.Name, proc) {
 				if p.IsParent {
-					if t.Watched[p.Pid] == "" {
-						if !t.Stopped[p.Pid] {
+					if !t.Stopped[p.Pid] {
+						if _, ok := t.Watched[p.Pid]; !ok {
+							t.Watched[p.Pid] = types.START
 							go t.Watch(p)
 						}
 					}
@@ -295,13 +286,19 @@ func getProcessByPid(pid int, procs *[]*types.Process) *types.Process {
 func (t *Traker) StopWatching(pid int) {
 	t.mu.Lock()
 	p := getProcessByPid(pid, t.Procceess)
-	fmt.Printf("found this proc: %+v\n", p)
-	if _, ok := t.Watched[pid]; ok {
+	_, ok := t.Watched[pid]
+	if ok {
 		t.Stopped[pid] = true
 		t.Watched[pid] = types.END
-		t.EventChan <- types.Event{Type: types.END, Process: p, Time: time.Now().Local()}
 	}
 	t.mu.Unlock()
+
+	if ok {
+		select {
+		case t.EventChan <- types.Event{Type: types.END, Process: p, Time: time.Now().UTC()}:
+		case <-t.Ctx.Done():
+		}
+	}
 }
 
 // func (t *Traker) StopWatchingByName(name string) []*types.Process {
@@ -327,9 +324,18 @@ func (t *Traker) AddManualWatch(pid int) bool {
 	if p == nil {
 		return false
 	}
-	if t.Watched[p.Pid] == "" {
+
+	if t.Stopped[p.Pid] {
+		delete(t.Stopped, p.Pid)
+	}
+
+	val, ok := t.Watched[p.Pid]
+	if !ok || val == types.END {
+		delete(t.Watched, p.Pid)
+		t.Watched[p.Pid] = types.START
 		go t.Watch(p)
 		return true
 	}
+
 	return false
 }

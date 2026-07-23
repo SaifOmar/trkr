@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	START  = "start"
-	END    = "end"
-	PAUSE  = "pause"
-	RESUME = "resume"
+	START   = "start"
+	RUNNING = "running"
+	END     = "end"
+	PAUSE   = "pause"
+	RESUME  = "resume"
 )
 
 type BaseModel struct {

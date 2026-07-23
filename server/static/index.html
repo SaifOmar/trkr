@@ -112,19 +112,19 @@
                     </div>
                 </div>
 
-                <div class="panel">
-                    <h2 class="panel-title">Projects</h2>
-                    <div class="building-chart" id="building-chart">
-                        <div class="skeleton-list">
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                            <div class="skeleton skeleton-building"></div>
-                        </div>
+                <div class="panel watchlist-panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">Automatic Watchlist</h2>
+                        <span class="watchlist-count" id="watchlist-count">0</span>
                     </div>
+                    <div class="watchlist-input-wrap">
+                        <input type="text" id="watchlist-input" placeholder="Add process name..." autocomplete="off" aria-label="Process name to watch">
+                        <button id="watchlist-add-btn" title="Add to watchlist" aria-label="Add to watchlist">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                    </div>
+                    <div class="watchlist-suggestions" id="watchlist-suggestions" hidden></div>
+                    <div class="watchlist-list" id="watchlist-list"></div>
                 </div>
             </div>
 
@@ -149,18 +149,19 @@
                     </div>
                 </div>
 
-                <div class="panel watchlist-panel">
-                    <div class="panel-header">
-                        <h2 class="panel-title">Watchlist</h2>
-                        <span class="watchlist-count" id="watchlist-count">0</span>
+                <div class="panel">
+                    <h2 class="panel-title">Sessions</h2>
+                    <div class="building-chart" id="building-chart">
+                        <div class="skeleton-list">
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                            <div class="skeleton skeleton-building"></div>
+                        </div>
                     </div>
-                    <div class="watchlist-input-wrap">
-                        <input type="text" id="watchlist-input" placeholder="Add process name..." autocomplete="off" aria-label="Process name to watch">
-                        <button id="watchlist-add-btn" title="Add to watchlist" aria-label="Add to watchlist">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                        </button>
-                    </div>
-                    <div class="watchlist-list" id="watchlist-list"></div>
                 </div>
             </div>
         </div>
@@ -172,6 +173,8 @@
             <div class="page-controls">
                 <select id="processes-filter" aria-label="Filter processes">
                     <option value="active" selected>All Processes</option>
+                    <option value="user">User Processes</option>
+                    <option value="system">System Processes</option>
                     <option value="watching">Watching</option>
                 </select>
                 <input type="text" id="processes-search" placeholder="Search processes..." autocomplete="off" aria-label="Search all processes">
@@ -240,12 +243,6 @@
 
     <div id="snackbar" class="snackbar" role="status" aria-live="polite"></div>
 
-    <script>
-        document.getElementById('menu-toggle').addEventListener('click', function() {
-            document.getElementById('nav-links').classList.toggle('open');
-            this.classList.toggle('open');
-        });
-    </script>
     <script src="app.js"></script>
 </body>
 </html>

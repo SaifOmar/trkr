@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -138,12 +137,12 @@ func (s *Server) RemoveAutoWatch(w http.ResponseWriter, r *http.Request) {
 	var autoWatch types.AutoWatch
 	err := s.store.DB.Where("name = ?", name).First(&autoWatch).Error
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, "autowatch not found", http.StatusNotFound)
 		return
 	}
 	s.store.DeleteAutoWatch(autoWatch.ID)
 	s.tr.RemoveAutoWatch(autoWatch.Name)
-	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
 }
 
 func (s *Server) CreateAutoWatch(w http.ResponseWriter, r *http.Request) {
@@ -171,14 +170,12 @@ func (s *Server) CreateAutoWatch(w http.ResponseWriter, r *http.Request) {
 
 	s.tr.AddAutoWatch(autoWatch.Name)
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"status": "created"})
 }
 
 func (s *Server) GetActiveSessions(w http.ResponseWriter, r *http.Request) {
 	// TODO : get current session from the main process
 	sessions := s.ActiveSessions
-	for _, session := range sessions {
-		fmt.Println("server session: ", session)
-	}
 	json.NewEncoder(w).Encode(sessions)
 }
 
@@ -195,7 +192,6 @@ func (s *Server) StopActiveSession(w http.ResponseWriter, r *http.Request) {
 
 	// Try PID first (most specific)
 	if req.Pid > 1 {
-		fmt.Println(req.Pid, req.Ppid, req.Name)
 		s.tr.StopWatching(req.Pid)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "count": "1"})
@@ -277,7 +273,6 @@ func (s *Server) StartManualWatch(w http.ResponseWriter, r *http.Request) {
 
 	targetPid := req.Pid
 	if req.WatchParent {
-		// Find child process, then find its parent
 		var child *types.Process
 		for _, p := range s.ActiveProcesses {
 			if p.Pid == req.Pid {
@@ -290,35 +285,33 @@ func (s *Server) StartManualWatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("[StartManualWatch] child: pid=%d ppid=%d name=%q is_parent=%v", child.Pid, child.Ppid, child.Name, child.IsParent)
-		log.Printf("[StartManualWatch] all same-name processes for %q:", child.Name)
-		for _, p := range s.ActiveProcesses {
-			if strings.EqualFold(p.Name, child.Name) {
-				log.Printf("  pid=%d ppid=%d name=%q is_parent=%v", p.Pid, p.Ppid, p.Name, p.IsParent)
-			}
-		}
-
 		found := false
 		for _, p := range s.ActiveProcesses {
 			if strings.EqualFold(p.Name, child.Name) && p.IsParent {
-				log.Printf("[StartManualWatch] chosen parent: pid=%d ppid=%d name=%q is_parent=%v", p.Pid, p.Ppid, p.Name, p.IsParent)
 				targetPid = p.Pid
 				found = true
 				break
 			}
 		}
 		if !found {
-			log.Printf("[StartManualWatch] no parent found for %q", child.Name)
 			http.Error(w, "parent process not found", http.StatusNotFound)
 			return
 		}
 	}
 
+	for _, s := range s.ActiveSessions {
+		if s.Proc.Pid == targetPid {
+			http.Error(w, "process not found or already watched", http.StatusNotFound)
+			return
+		}
+	}
+
 	if s.tr.AddManualWatch(targetPid) {
+		log.Println("watching", targetPid)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "watching"})
 	} else {
-		http.Error(w, "process not found or already watched", http.StatusNotFound)
+		log.Println("process not found or already watched", targetPid, req.WatchParent, req.Pid)
 	}
 }
 
