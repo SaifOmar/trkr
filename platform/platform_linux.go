@@ -3,12 +3,13 @@
 package platform
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/SaifOmar/trkr/types"
@@ -16,91 +17,91 @@ import (
 
 var deviceName = GetDeviceName()
 
+var cachedProcs = make(map[int]*types.Process)
+
 func PollProc(myProcessies *[]*types.Process) {
 	uid := os.Getuid()
-	err := filepath.WalkDir("/proc/", func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	Dir, err := os.ReadDir("/proc")
+	if err != nil {
+		panic(err)
+	}
+
+	seen := make(map[int]struct{}, len(Dir))
+
+loop:
+	for _, f := range Dir {
+		if !f.IsDir() {
+			continue
 		}
-		if strings.HasSuffix(path, "status") {
-			parts := strings.Split(path, "/")
-			if len(parts) != 4 {
-				return nil
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
+		pid, err := strconv.Atoi(f.Name())
+		if err != nil {
+			continue
+		}
+		seen[pid] = struct{}{}
 
-			prc := &types.Process{IsParent: false, DeviceName: deviceName}
-			GetOS(prc)
+		if val, ok := cachedProcs[pid]; ok {
+			*myProcessies = append(*myProcessies, val)
+			continue
+		}
 
-			matchesUID := false
+		proc := &types.Process{Pid: pid, IsParent: false, DeviceName: deviceName}
 
-			lines := strings.SplitSeq(string(data), "\n")
-			for line := range lines {
-				switch {
-				case strings.HasPrefix(line, "Name:"):
-					prc.Name = strings.TrimSpace(strings.Split(line, ":")[1])
+		dirInfo, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+		if err != nil {
+			continue
+		}
+		if stat, ok := dirInfo.Sys().(*syscall.Stat_t); ok {
+			proc.StartTime = time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
+		}
 
-				case strings.HasPrefix(line, "Pid:"):
-					if fields := strings.Fields(line); len(fields) >= 2 {
-						prc.Pid, _ = strconv.Atoi(fields[1])
-					}
+		statusFile, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))
+		if err != nil {
+			continue
+		}
 
-				case strings.HasPrefix(line, "PPid:"):
-					if fields := strings.Fields(line); len(fields) >= 2 {
-						prc.Ppid, _ = strconv.Atoi(fields[1])
-					}
+		scanner := bufio.NewScanner(statusFile)
+		gotName, gotPid, gotPpid := false, false, false
+		for scanner.Scan() {
+			line := scanner.Bytes()
 
-				case strings.HasPrefix(line, "Tgid:"):
-					if fields := strings.Fields(line); len(fields) >= 2 {
-						prc.Tgid, _ = strconv.Atoi(fields[1])
-					}
-
-				case strings.HasPrefix(line, "Uid:"):
-					// uid line has 4 values: real, effective, saved, filesystem
-					if fields := strings.Fields(line); len(fields) >= 2 {
-						if ownerUID, err := strconv.Atoi(fields[1]); err == nil && ownerUID == uid {
-							matchesUID = true
-						}
+			if !gotName && bytes.HasPrefix(line, []byte("Name:")) {
+				proc.Name = strings.TrimSpace(string(line[5:]))
+				gotName = true
+			} else if bytes.HasPrefix(line, []byte("Uid:")) {
+				if fields := bytes.Fields(line); len(fields) >= 2 {
+					if ownerUID, err := strconv.Atoi(string(fields[1])); err == nil && ownerUID != uid {
+						statusFile.Close()
+						continue loop
 					}
 				}
+			} else if !gotPid && bytes.HasPrefix(line, []byte("Pid:")) {
+				if fields := bytes.Fields(line); len(fields) >= 2 {
+					proc.Pid, _ = strconv.Atoi(string(fields[1]))
+				}
+				gotPid = true
+			} else if !gotPpid && bytes.HasPrefix(line, []byte("PPid:")) {
+				if fields := bytes.Fields(line); len(fields) >= 2 {
+					proc.Ppid, _ = strconv.Atoi(string(fields[1]))
+				}
+				gotPpid = true
 			}
 
-			if matchesUID {
-				GetStartTime(prc)
-				*myProcessies = append(*myProcessies, prc)
+			if gotName && gotPid && gotPpid {
+				break
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		fmt.Println(err)
-	}
-}
-func GetStartTime(proc *types.Process) error {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.Pid))
-	if err != nil {
-		return err
-	}
-	content := bytes.Split(data, []byte{')'})[1]
-	fields := bytes.Fields(content)
-	for i := range fields {
-		if i == 19 {
-			bootTime, err := getBootTime()
-			if err != nil {
-				return err
-			}
-			startTicks, _ := strconv.ParseInt(string(fields[19]), 10, 64) // I don't know what is this
-			proc.StartTime = time.Unix(bootTime+startTicks/100, (startTicks%100)*10_000_000)
-		}
-	}
-	return nil
-}
+		statusFile.Close()
 
-func GetOS(proc *types.Process) {
-	proc.OS = "linux"
+		proc.OS = "linux"
+		cachedProcs[pid] = proc
+		*myProcessies = append(*myProcessies, proc)
+	}
+
+	for pid := range cachedProcs {
+		if _, ok := seen[pid]; !ok {
+			delete(cachedProcs, pid)
+		}
+	}
 }
 
 func GetDeviceName() string {
@@ -109,33 +110,4 @@ func GetDeviceName() string {
 		return ""
 	}
 	return name
-}
-
-// func pollProcStat(pid int) error {
-// 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return err
-// 	}
-// 	if len(data) == 0 {
-// 		return os.ErrNotExist
-// 	}
-// 	return nil
-// }
-
-func getBootTime() (int64, error) {
-	data, err := os.ReadFile("/proc/stat")
-	if err != nil {
-		return 0, err
-	}
-	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-		if bytes.HasPrefix(line, []byte("btime")) {
-			fields := bytes.Fields(line)
-			if len(fields) < 2 {
-				return 0, fmt.Errorf("bad btime line")
-			}
-			return strconv.ParseInt(string(fields[1]), 10, 64)
-		}
-	}
-	return 0, fmt.Errorf("btime not found")
 }
