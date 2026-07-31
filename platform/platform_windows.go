@@ -15,6 +15,8 @@ import (
 var deviceName = GetDeviceName()
 
 func PollProc(processes *[]*types.Process) {
+	// Note(saif): we don't really need to cache here
+	// all tests on windows shows almost 0 cpu usage, but maybe still profile this
 	hwin, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		panic(err)
@@ -32,28 +34,27 @@ func PollProc(processes *[]*types.Process) {
 		}
 		name := strings.TrimSuffix(windows.UTF16ToString(ProcessEnetry32.ExeFile[:]), ".exe")
 		p := &types.Process{Name: name, Pid: int(ProcessEnetry32.ProcessID), Ppid: int(ProcessEnetry32.ParentProcessID), DeviceName: deviceName}
-		GetStartTime(p)
-		GetOS(p)
+		p.StartTime = GetStartTime(int(ProcessEnetry32.ProcessID))
+		p.OS = GetOS()
 		*processes = append(*processes, p)
-
 	}
-
 }
 
-func GetStartTime(proc *types.Process) error {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(proc.Pid))
+func GetStartTime(pid int) time.Time {
+	var StartTime time.Time
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return err
+		return StartTime
 	}
 	defer windows.CloseHandle(h)
 
 	var creation, exit, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
-		return err
+		return StartTime
 	}
 
-	proc.StartTime = time.Unix(0, creation.Nanoseconds())
-	return nil
+	StartTime = time.Unix(0, creation.Nanoseconds())
+	return StartTime
 }
 
 func GetDeviceName() string {
@@ -64,6 +65,6 @@ func GetDeviceName() string {
 	return name
 }
 
-func GetOS(proc *types.Process) {
-	proc.OS = "windows"
+func GetOS() string {
+	return "windows"
 }

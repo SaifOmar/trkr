@@ -1,7 +1,6 @@
 package trkr
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
@@ -32,11 +31,11 @@ func New(ctx context.Context, processesChan chan []*types.Process, ticker *time.
 		ProcessesChan: processesChan,
 		Ctx:           ctx,
 		Ticker:        ticker,
-		mu:            &sync.RWMutex{},
-		EventChan:     make(chan types.Event, 10),
-		Procceess:     &[]*types.Process{},
-		Watched:       make(map[int]types.EventType),
 		LocalStore:    store,
+		mu:            &sync.RWMutex{},
+		Procceess:     &[]*types.Process{},
+		EventChan:     make(chan types.Event, 10),
+		Watched:       make(map[int]types.EventType),
 		Stopped:       make(map[int]bool),
 	}
 }
@@ -104,7 +103,7 @@ func (t *Traker) Run() {
 // NOTE: watch process and send events to the channel on
 // CLOSE , PAUSE , RESUME, START, etc
 // TODO : PAUSE, RESUME
-func (t *Traker) Watch(proc *types.Process) {
+func (t *Traker) watch(proc *types.Process) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	breaker := false
@@ -157,32 +156,10 @@ func (t *Traker) Watch(proc *types.Process) {
 			}
 		}
 		if breaker {
-			fmt.Println("Watcher goroutine is done")
 			return
 		}
 	}
 }
-
-// func writeToTestFile(p *types.Process) {
-// 	cwd, err := os.Getwd()
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return
-// 	}
-//
-// 	fileName := filepath.Join(cwd, "cmd.txt")
-//
-// 	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return
-// 	}
-// 	defer f.Close()
-//
-// 	if _, err := fmt.Fprintf(f, "%+v\n", p); err != nil {
-// 		fmt.Println(err)
-// 	}
-// }
 
 func filterbyPid(pid int, procs *[]*types.Process) *types.Process {
 	var p *types.Process
@@ -222,7 +199,7 @@ func (t *Traker) tick() {
 					if !t.Stopped[p.Pid] {
 						if _, ok := t.Watched[p.Pid]; !ok {
 							t.Watched[p.Pid] = types.START
-							go t.Watch(p)
+							go t.watch(p)
 						}
 					}
 				}
@@ -231,17 +208,12 @@ func (t *Traker) tick() {
 	}
 }
 
-// TODO : look into the store for this and return the slice
 func (t *Traker) getAutoWatchList() {
 	v := t.LocalStore.GetAllAutoWatch()
 	for _, autoWatch := range v {
 		t.AutoWatchList = append(t.AutoWatchList, autoWatch.Name)
 	}
 }
-
-// func (t *Traker) closeAll() {
-// 	close(t.ProcessesChan)
-// }
 
 func FilterWithName(name string, procs *[]*types.Process) *types.Process {
 	for _, proc := range *procs {
@@ -274,6 +246,7 @@ func (t *Traker) RemoveAutoWatch(name string) {
 		}
 	}
 }
+
 func getProcessByPid(pid int, procs *[]*types.Process) *types.Process {
 	for _, proc := range *procs {
 		if proc.Pid == pid {
@@ -300,23 +273,6 @@ func (t *Traker) StopWatching(pid int) {
 		}
 	}
 }
-
-// func (t *Traker) StopWatchingByName(name string) []*types.Process {
-// 	t.mu.Lock()
-// 	defer t.mu.Unlock()
-//
-// 	var stopped []*types.Process
-// 	for _, proc := range *t.Procceess {
-// 		if strings.EqualFold(proc.Name, name) {
-// 			if _, ok := t.WatchList.Watched[proc.Pid]; ok {
-// 				t.WatchList.Watched[proc.Pid] = types.END
-// 				stopped = append(stopped, proc)
-// 			}
-// 		}
-// 	}
-// 	return stopped
-// }
-
 func (t *Traker) AddManualWatch(pid int) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -333,7 +289,7 @@ func (t *Traker) AddManualWatch(pid int) bool {
 	if !ok || val == types.END {
 		delete(t.Watched, p.Pid)
 		t.Watched[p.Pid] = types.START
-		go t.Watch(p)
+		go t.watch(p)
 		return true
 	}
 

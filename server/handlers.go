@@ -174,7 +174,6 @@ func (s *Server) CreateAutoWatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetActiveSessions(w http.ResponseWriter, r *http.Request) {
-	// TODO : get current session from the main process
 	sessions := s.ActiveSessions
 	json.NewEncoder(w).Encode(sessions)
 }
@@ -190,69 +189,12 @@ func (s *Server) StopActiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try PID first (most specific)
 	if req.Pid > 1 {
 		s.tr.StopWatching(req.Pid)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "count": "1"})
 		return
 	}
-
-	// Try PPID + Name
-	// if req.Ppid > 0 && req.Name != "" {
-	// 	procs := s.tr.StopWatchingByName(req.Name)
-	// 	for _, p := range procs {
-	// 		if p.Ppid == req.Ppid {
-	// 			s.tr.StopWatching(p.Pid)
-	// 		}
-	// 	}
-	// 	now := time.Now()
-	// 	var remaining []*types.Session
-	// 	stopped := 0
-	// 	for _, ses := range s.ActiveSessions {
-	// 		if ses.Proc != nil && ses.Proc.Ppid == req.Ppid && strings.EqualFold(ses.Proc.Name, req.Name) {
-	// 			ses.Duration = now.Sub(ses.StartTime)
-	// 			ses.EndTime = &now
-	// 			s.store.UpdateSession(ses)
-	// 			stopped++
-	// 		} else {
-	// 			remaining = append(remaining, ses)
-	// 		}
-	// 	}
-	// 	s.ActiveSessions = remaining
-	// 	if stopped > 0 {
-	// 		w.WriteHeader(http.StatusOK)
-	// 		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "count": strconv.Itoa(stopped)})
-	// 		return
-	// 	}
-	// }
-
-	// Fallback: stop by name only
-	// if req.Name != "" {
-	// 	procs := s.tr.StopWatchingByName(req.Name)
-	// 	for _, p := range procs {
-	// 		s.tr.StopWatching(p.Pid)
-	// 	}
-	// 	now := time.Now()
-	// 	var remaining []*types.Session
-	// 	stopped := 0
-	// 	for _, ses := range s.ActiveSessions {
-	// 		if ses.Proc != nil && strings.EqualFold(ses.Proc.Name, req.Name) {
-	// 			ses.Duration = now.Sub(ses.StartTime)
-	// 			ses.EndTime = &now
-	// 			s.store.UpdateSession(ses)
-	// 			stopped++
-	// 		} else {
-	// 			remaining = append(remaining, ses)
-	// 		}
-	// 	}
-	// 	s.ActiveSessions = remaining
-	// 	if stopped > 0 {
-	// 		w.WriteHeader(http.StatusOK)
-	// 		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "count": strconv.Itoa(stopped)})
-	// 		return
-	// 	}
-	// }
 
 	http.Error(w, "no active session found", http.StatusNotFound)
 }

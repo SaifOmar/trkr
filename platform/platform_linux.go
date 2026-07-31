@@ -19,6 +19,9 @@ var deviceName = GetDeviceName()
 
 var cachedProcs = make(map[int]*types.Process)
 
+func GetOS() string {
+	return "linux"
+}
 func PollProc(myProcessies *[]*types.Process) {
 	uid := os.Getuid()
 	Dir, err := os.ReadDir("/proc")
@@ -26,6 +29,7 @@ func PollProc(myProcessies *[]*types.Process) {
 		panic(err)
 	}
 
+	// NOTE(future saif) : this is used to remove all processes that closed this tick from the cache, preventing stale cache
 	seen := make(map[int]struct{}, len(Dir))
 
 loop:
@@ -45,14 +49,6 @@ loop:
 		}
 
 		proc := &types.Process{Pid: pid, IsParent: false, DeviceName: deviceName}
-
-		dirInfo, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
-		if err != nil {
-			continue
-		}
-		if stat, ok := dirInfo.Sys().(*syscall.Stat_t); ok {
-			proc.StartTime = time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
-		}
 
 		statusFile, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))
 		if err != nil {
@@ -92,7 +88,8 @@ loop:
 		}
 		statusFile.Close()
 
-		proc.OS = "linux"
+		proc.OS = GetOS()
+		proc.StartTime = GetProcStartTime(pid)
 		cachedProcs[pid] = proc
 		*myProcessies = append(*myProcessies, proc)
 	}
@@ -102,6 +99,19 @@ loop:
 			delete(cachedProcs, pid)
 		}
 	}
+}
+
+func GetProcStartTime(pid int) time.Time {
+	// NOTE(saif): don't go back to computing start time from btime we don't need that type of time accuracy
+	var StartTime time.Time
+	dirInfo, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	if err != nil {
+		return time.Time{}
+	}
+	if stat, ok := dirInfo.Sys().(*syscall.Stat_t); ok {
+		StartTime = time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
+	}
+	return StartTime
 }
 
 func GetDeviceName() string {

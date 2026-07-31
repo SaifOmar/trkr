@@ -307,7 +307,6 @@ loop:
 			}
 
 		case snapshot := <-t.ProcessesChan:
-			// TODO : consume for the server
 			server.ActiveProcesses = snapshot
 
 		case e := <-errChan:
