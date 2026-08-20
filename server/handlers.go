@@ -5,8 +5,11 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/SaifOmar/trkr/types"
 	"gorm.io/gorm"
@@ -258,8 +261,67 @@ func (s *Server) StartManualWatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetAllSessions(w http.ResponseWriter, r *http.Request) {
-	sessions := s.store.GetAllSession()
-	json.NewEncoder(w).Encode(sessions)
+	type MergedSession struct {
+		types.Session
+		PIDs []uint `json:"pids"` // process_ids of every merged session folded into this one
+	}
+
+	allSessions := s.store.GetAllSession()
+	mergeSessions := func(sessions []*types.Session, gapThreshold time.Duration) []MergedSession {
+		sorted := slices.Clone(sessions)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].StartTime.Before(sorted[j].StartTime)
+		})
+
+		lastIndexByProc := make(map[string]int) // ProcName -> index in merged
+		var merged []MergedSession
+
+		for _, s := range sorted {
+			procName := ""
+			if s.Proc != nil {
+				procName = s.Proc.Name
+			}
+
+			if idx, ok := lastIndexByProc[procName]; ok {
+				last := &merged[idx]
+				mergeable := last.EndTime == nil ||
+					s.StartTime.Sub(*last.EndTime) <= gapThreshold
+
+				if mergeable {
+					if s.EndTime == nil {
+						last.EndTime = nil
+					} else if last.EndTime != nil && s.EndTime.After(*last.EndTime) {
+						last.EndTime = s.EndTime
+					}
+					// Only ongoing blocks get a computed duration; live sessions
+					// report 0 and the frontend derives the elapsed time from
+					// start_time. Never use time.Now() here — it inflates an
+					// open block to "since it first started".
+					if last.EndTime != nil {
+						last.Duration = last.EndTime.Sub(last.StartTime)
+					} else {
+						last.Duration = 0
+					}
+					last.PIDs = append(last.PIDs, s.ProcessID)
+					continue
+				}
+			}
+
+			merged = append(merged, MergedSession{
+				Session: *s,
+				PIDs:    []uint{s.ProcessID},
+			})
+			lastIndexByProc[procName] = len(merged) - 1
+		}
+
+		// Latest first, matching GetAllSession's ordering intent.
+		sort.Slice(merged, func(i, j int) bool {
+			return merged[i].StartTime.After(merged[j].StartTime)
+		})
+		return merged
+	}
+
+	json.NewEncoder(w).Encode(mergeSessions(allSessions, time.Hour))
 }
 
 func (s *Server) GetSession(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,9 @@
 package trkr
 
 import (
+	"fmt"
+	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -21,8 +24,10 @@ type Traker struct {
 	EventChan     chan types.Event
 	AutoWatchList []string
 
-	Stopped    map[int]bool
-	Watched    map[int]types.EventType
+	Paused  map[int]bool
+	Stopped map[int]bool // stpped manualy
+	Watched map[int]types.EventType
+
 	LocalStore *store.Store
 }
 
@@ -73,7 +78,6 @@ func findRoot(proc *types.Process, processes []*types.Process) *types.Process {
 	return findRoot(parent, processes)
 }
 
-// TODO : should optimize this
 func (t *Traker) fillIsParent() {
 	for _, proc := range *t.Procceess {
 		root := findRoot(proc, *t.Procceess)
@@ -87,11 +91,40 @@ func (t *Traker) fillIsParent() {
 }
 
 func (t *Traker) Run() {
+	wtf := func(m map[int]types.EventType) {
+		f, err := os.OpenFile(
+			"testwatched.txt",
+			os.O_CREATE|os.O_WRONLY|os.O_TRUNC,
+			0644,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		// t.mu.Lock()
+		for k, v := range m {
+			p := filterbyPid(k, t.Procceess)
+			if p == nil {
+				continue
+			}
+			_, err = fmt.Fprintf(f, "%d %s %s\n", p.Pid, p.Name, v)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		// t.mu.Unlock()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	t.getAutoWatchList()
 	for {
 		select {
 		case <-t.Ticker.C:
 			t.tick()
+			wtf(t.Watched)
+
 		case <-t.Ctx.Done():
 			t.Ticker.Stop()
 			close(t.ProcessesChan)
@@ -120,30 +153,44 @@ func (t *Traker) watch(proc *types.Process) {
 			var ev types.Event
 
 			if p != nil {
-				switch {
-				case t.Stopped[proc.Pid]:
-					delete(t.Watched, proc.Pid)
-					breaker = true
-				case !ok:
-					t.Watched[proc.Pid] = types.START
-					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
-				case val == types.END:
-					delete(t.Watched, proc.Pid)
-					breaker = true
-				case val == types.START:
-					t.Watched[proc.Pid] = types.RUNNING
-					ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
-
+				if t.isProcessActive(p) {
+					switch {
+					case t.Stopped[proc.Pid]: // stop tracking that process
+						delete(t.Watched, proc.Pid)
+						breaker = true
+					case !ok: // process is not being watched ?? why ?
+						t.Watched[proc.Pid] = types.START
+						ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
+					//
+					case val == types.END:
+						delete(t.Watched, proc.Pid)
+						breaker = true
+					// TODO : add a timer (maybe user can change it but make it at least 5 mints)
+					// and debounce chaging the pause resume with it
+					case val == types.START:
+						t.Watched[proc.Pid] = types.RUNNING
+						ev = types.Event{Type: types.START, Process: proc, Time: time.Now().UTC()}
+					case val == types.PAUSE:
+						t.Watched[proc.Pid] = types.RUNNING // I can have this be running
+						ev = types.Event{Type: types.RESUME, Process: proc, Time: time.Now().UTC()}
+					}
+				} else {
+					if val == types.RUNNING {
+						t.Watched[proc.Pid] = types.PAUSE
+						ev = types.Event{Type: types.PAUSE, Process: proc, Time: time.Now().UTC()}
+					}
 				}
+
 			} else {
 				switch val {
+				// NOTE (saif) : the first case is just a safety fallback for when a process is closed from the server
 				case types.END:
 					delete(t.Watched, proc.Pid)
+					breaker = true
 				default:
 					t.Watched[proc.Pid] = types.END
 					ev = types.Event{Type: types.END, Process: proc, Time: time.Now().UTC()}
 				}
-				breaker = true
 			}
 			t.mu.Unlock()
 
@@ -273,6 +320,7 @@ func (t *Traker) StopWatching(pid int) {
 		}
 	}
 }
+
 func (t *Traker) AddManualWatch(pid int) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -294,4 +342,7 @@ func (t *Traker) AddManualWatch(pid int) bool {
 	}
 
 	return false
+}
+func (t *Traker) isProcessActive(proc *types.Process) bool {
+	return platform.IsWindowFocused(proc.Pid)
 }

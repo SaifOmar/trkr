@@ -9,24 +9,24 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const SYSTEM_PROCS_LINUX = new Set([
-  'systemd', 'pipewire', 'pipewire-pulse', 'wireplumber',
-  'dbus-daemon', 'dbus-broker', 'dbus-broker-launch',
-  'xdg-dbus-proxy', 'xdg-desktop-portal', 'xdg-desktop-portal-gtk',
-  'xdg-document-portal', 'xdg-permission-store',
-  'gvfsd', 'gvfsd-fuse', 'gvfsd-trash', 'gvfsd-metadata',
-  'pulseaudio', 'rtkit-daemon', 'at-spi-bus-launcher', 'at-spi2-registryd',
-  'gnome-shell', 'gnome-session', 'gnome-session-binary',
-  'ssh-agent', 'gdm-session-worker', 'Xorg',
-  'upowerd', 'NetworkManager', 'bluetoothd', 'wpa_supplicant',
-  'accounts-daemon', 'packagekitd', 'snapd', 'udisksd', 'fwupd',
-  'goa-daemon', 'evolution-source-registry',
-  'colord', 'geoclue', 'dnsmasq', 'boltd',
+    'systemd', 'pipewire', 'pipewire-pulse', 'wireplumber',
+    'dbus-daemon', 'dbus-broker', 'dbus-broker-launch',
+    'xdg-dbus-proxy', 'xdg-desktop-portal', 'xdg-desktop-portal-gtk',
+    'xdg-document-portal', 'xdg-permission-store',
+    'gvfsd', 'gvfsd-fuse', 'gvfsd-trash', 'gvfsd-metadata',
+    'pulseaudio', 'rtkit-daemon', 'at-spi-bus-launcher', 'at-spi2-registryd',
+    'gnome-shell', 'gnome-session', 'gnome-session-binary',
+    'ssh-agent', 'gdm-session-worker', 'Xorg',
+    'upowerd', 'NetworkManager', 'bluetoothd', 'wpa_supplicant',
+    'accounts-daemon', 'packagekitd', 'snapd', 'udisksd', 'fwupd',
+    'goa-daemon', 'evolution-source-registry',
+    'colord', 'geoclue', 'dnsmasq', 'boltd',
 ]);
 
 const SYSTEM_PROCS_WINDOWS = new Set([
-  'svchost', 'System', 'smss', 'csrss', 'wininit', 'services',
-  'lsass', 'winlogon', 'conhost', 'RuntimeBroker',
-  'SearchIndexer', 'WmiPrvSE', 'SgrmBroker',
+    'svchost', 'System', 'smss', 'csrss', 'wininit', 'services',
+    'lsass', 'winlogon', 'conhost', 'RuntimeBroker',
+    'SearchIndexer', 'WmiPrvSE', 'SgrmBroker',
 ]);
 
 // ── DOM ──
@@ -329,9 +329,25 @@ function daysAgo(n) {
 }
 
 // ── Computation ──
+
+// Duration in nanoseconds of a session. Never trusts the stored `duration`
+// field for ongoing sessions (the backend emits huge/bogus values while a
+// session is running) — instead it is recomputed from start/end timestamps.
+function sessionDur(s) {
+    if (!s || !s.start_time) return s?.duration || 0;
+    const start = new Date(s.start_time).getTime();
+    const end = s.end_time ? new Date(s.end_time).getTime() : Date.now();
+    const ms = end - start;
+    if (ms > 0) return ms * 1e6;
+    return s.duration || 0;
+}
+
 function weekSessions() {
     const cutoff = daysAgo(7);
-    const ended = store.get('sessions').filter(s => new Date(s.start_time) >= cutoff);
+    // Only ended history sessions; live ones are tracked via activeSessions.
+    // This avoids double counting (a running session can appear in both
+    // stores) and the bogus durations of ongoing sessions.
+    const ended = store.get('sessions').filter(s => s.end_time && new Date(s.start_time) >= cutoff);
     const active = store.get('activeSessions').filter(s => new Date(s.start_time) >= cutoff);
     return [...ended, ...active];
 }
@@ -377,7 +393,7 @@ function computeStats() {
     const numDays = Math.max(daySet.size, 1);
     const avg = totalDur / numDays;
     const dayMap = {};
-    ws.forEach(s => { const d = new Date(s.start_time).getDay(); dayMap[d] = (dayMap[d] || 0) + (s.duration || 0); });
+    ws.forEach(s => { const d = new Date(s.start_time).getDay(); dayMap[d] = (dayMap[d] || 0) + sessionDur(s); });
     let bestDay = 0, bestVal = 0;
     for (const [d, v] of Object.entries(dayMap)) { if (v > bestVal) { bestVal = v; bestDay = +d; } }
     return { total: totalDur, today: todayDur, avg, bestDay: DAYS[bestDay], bestDayFull: DAYS_FULL[bestDay], numDays };
@@ -396,7 +412,7 @@ function computeDaily() {
         const bucket = days.find(d => d.key === key);
         if (!bucket) return;
         const name = s.proc?.name || 'PID ' + s.process_id;
-        bucket.procs[name] = (bucket.procs[name] || 0) + (s.duration || 0);
+        bucket.procs[name] = (bucket.procs[name] || 0) + sessionDur(s);
     });
     days.forEach(d => {
         const daySessions = weekSessions().filter(s => {
@@ -587,13 +603,13 @@ function renderDashboardDonut() {
     }
 
     const ws = weekSessions();
-    const total = ws.reduce((a, s) => a + (s.duration || 0), 0) || 1;
+    const total = ws.reduce((a, s) => a + sessionDur(s), 0) || 1;
 
     // Group by process name
     const procMap = {};
     ws.forEach(s => {
         const name = s.proc?.name || 'PID ' + s.process_id;
-        procMap[name] = (procMap[name] || 0) + (s.duration || 0);
+        procMap[name] = (procMap[name] || 0) + sessionDur(s);
     });
 
     // Sort by duration descending
@@ -920,7 +936,7 @@ function renderHistoryView(resetLimit = false) {
     } else if (sort === 'oldest') {
         filtered.sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
     } else if (sort === 'longest') {
-        filtered.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+        filtered.sort((a, b) => sessionDur(b) - sessionDur(a));
     }
 
     const paginated = filtered.slice(0, historyLimit);
@@ -961,11 +977,7 @@ function renderHistoryItem(s) {
     const startStr = fmtTime(s.start_time);
     const endStr = isOngoing ? 'Active' : fmtTime(s.end_time);
 
-    let trackedNanos = s.duration || 0;
-    if (isOngoing && s.start_time) {
-        const elapsed = Date.now() - new Date(s.start_time).getTime();
-        if (elapsed > 0) trackedNanos = elapsed * 1e6;
-    }
+    const trackedNanos = sessionDur(s);
 
     let procRuntimeNanos = 0;
     if (s.proc?.start_time) {
@@ -1014,7 +1026,7 @@ function openDetail(name) {
     }
 
     const procSessions = sessions.filter(s => (s.proc?.name || 'PID ' + s.process_id) === name);
-    const totalDur = procSessions.reduce((a, s) => a + (s.duration || 0), 0);
+    const totalDur = procSessions.reduce((a, s) => a + sessionDur(s), 0);
     const isActive = activeProcs.some(item => item.name === name) || activeSessions.some(s => s.proc?.name === name);
     const isAutoWatched = autoWatch.some(w => w.name.toLowerCase() === (name || '').toLowerCase());
     const activeSes = activeSessions.find(s => s.proc?.name === name);
@@ -1133,13 +1145,13 @@ function openSessionDetail(session) {
     const activeSessions = store.get('activeSessions');
 
     const procSessions = allSessions.filter(s => (s.proc?.name || 'PID ' + s.process_id) === name);
-    const totalDur = procSessions.reduce((a, s) => a + (s.duration || 0), 0);
+    const totalDur = procSessions.reduce((a, s) => a + sessionDur(s), 0);
     const isAutoWatched = autoWatch.some(w => w.name.toLowerCase() === (name || '').toLowerCase());
     const activeSes = activeSessions.find(s => s.proc?.name === name);
 
     const liveDur = isActive && session.start_time
         ? fmtLiveDur(now - new Date(session.start_time).getTime())
-        : fmtDur(session.duration || 0);
+        : fmtDur(sessionDur(session));
 
     dom.detailTitle.textContent = name;
 
@@ -1147,7 +1159,7 @@ function openSessionDetail(session) {
         '<div class="detail-section-title">Session Info</div>' +
         (isActive ? '<div class="detail-current-session"><span class="detail-label">Current Session</span><span class="live-text">' + liveDur + '</span></div>' : '') +
         '<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" style="color:' + (isActive ? 'var(--green)' : 'var(--text-dim)') + '">' + (isActive ? 'Active' : 'Ended') + '</span></div>' +
-        '<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value' + (isActive ? ' live-text' : '') + '">' + (isActive ? liveDur : fmtDur(session.duration || 0)) + '</span></div>' +
+        '<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value' + (isActive ? ' live-text' : '') + '">' + (isActive ? liveDur : fmtDur(sessionDur(session))) + '</span></div>' +
         '<div class="detail-row"><span class="detail-label">Started</span><span class="detail-value">' + fmtTime(session.start_time) + '</span></div>' +
         '<div class="detail-row"><span class="detail-label">Ended</span><span class="detail-value">' + (session.end_time ? fmtTime(session.end_time) : '—') + '</span></div>' +
         '<div class="detail-row"><span class="detail-label">Session ID</span><span class="detail-value">#' + session.id + '</span></div>' +

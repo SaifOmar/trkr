@@ -263,10 +263,38 @@ func main() {
 		done <- struct{}{}
 	}()
 
+	getTargetSession := func(pid int, sessions []*types.Session) *types.Session {
+		idx := slices.IndexFunc(sessions, func(s *types.Session) bool {
+			return s.Proc.Pid == pid
+		})
+		var ses *types.Session
+		if idx != -1 {
+			ses = sessions[idx]
+			return ses
+		}
+		return nil
+	}
+	wtl := func(e types.Event) {
+		f, err := os.OpenFile(
+			"logevents.txt",
+			os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+			0644,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+
+		_, err = fmt.Fprintf(f, "eventType: %s, pid: %d, name: %s\n", e.Type, e.Process.Pid, e.Process.Name)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 loop:
 	for {
 		select {
 		case e := <-t.EventChan:
+			wtl(e)
 			switch e.Type {
 			case types.START:
 				e.Process.Duration = time.Since(e.Process.StartTime)
@@ -274,21 +302,47 @@ loop:
 					StartTime: e.Time,
 					ProcessID: e.Process.ID,
 					Proc:      e.Process,
+					Status:    0,
 				}
 				activeSessions = append(activeSessions, session)
-				fmt.Println(activeSessions)
 				server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
-				fmt.Println(server.ActiveSessions)
 				localStore.CreateProcess(e.Process)
 				localStore.CreateSession(session)
+			case types.PAUSE:
+				ses := getTargetSession(e.Process.Pid, activeSessions)
+				if ses != nil {
+					ses.Duration = e.Time.Sub(ses.StartTime)
+					ses.EndTime = &e.Time
+					ses.Status = 1
+					serverSession := getTargetSession(e.Process.Pid, server.ActiveSessions)
+					if serverSession != nil {
+						server.ActiveSessions = removeSession(activeSessions, serverSession)
+					}
+				}
+			case types.RESUME:
+				ses := getTargetSession(e.Process.Pid, activeSessions)
+				fmt.Printf("Resume %d %s\n", e.Process.Pid, e.Process.Name)
+				fmt.Printf("ActiveSessions: %v\n", activeSessions)
+
+				if ses != nil {
+					ses.StartTime = e.Time // resuming — this is effectively a new segment
+					ses.EndTime = nil
+					ses.Status = 0
+					serverSession := getTargetSession(e.Process.Pid, server.ActiveSessions)
+					if serverSession != nil {
+						server.ActiveSessions = removeSession(server.ActiveSessions, serverSession)
+					}
+					server.ActiveSessions = append(server.ActiveSessions, ses)
+				}
 			case types.END:
-				pid := e.Process.Pid
-				idx := slices.IndexFunc(server.ActiveSessions, func(s *types.Session) bool {
-					return s.Proc.Pid == pid
-				})
-				var ses *types.Session
-				if idx != -1 {
-					ses = server.ActiveSessions[idx]
+				ses := getTargetSession(e.Process.Pid, activeSessions)
+				// pid := e.Process.Pid
+				// idx := slices.IndexFunc(server.ActiveSessions, func(s *types.Session) bool {
+				// 	return s.Proc.Pid == pid
+				// })
+				// var ses *types.Session
+				if ses != nil {
+					// ses = server.ActiveSessions[idx]
 					// ses := localStore.GetSessionByProcessID(e.Process.Pid)
 					fmt.Println("ses: ", ses)
 					ses.Duration = e.Time.Sub(ses.StartTime)
@@ -297,12 +351,20 @@ loop:
 					fmt.Println(activeSessions)
 					server.ActiveSessions = append([]*types.Session(nil), activeSessions...)
 					fmt.Println(server.ActiveSessions)
+
 					localStore.UpdateSession(ses)
 					proc := localStore.GetProcess(ses.ProcessID)
 					if proc != nil {
 						proc.Duration = e.Time.Sub(proc.StartTime)
 						localStore.UpdateProcess(proc)
+					} else {
+						// TODO : Handle this case
+						// TODO : LOG mayeb ?
 					}
+
+				} else {
+					// TODO : Handle this case
+					// TODO : LOG mayeb ?
 				}
 			}
 

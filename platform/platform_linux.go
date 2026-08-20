@@ -5,8 +5,11 @@ package platform
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -120,4 +123,41 @@ func GetDeviceName() string {
 		return ""
 	}
 	return name
+}
+
+// NOTE (saif) : this only works with hyprland prob shouldn't be here or should be abstracted
+func IsWindowFocused(pid int) bool {
+	cmd := exec.Command("hyprctl", "activewindow", "-j")
+	out, err := cmd.Output()
+
+	if err != nil {
+		log.Fatal(err)
+		return false
+	}
+	var activeWindow types.HyprlandActiveWindow
+	err = json.Unmarshal(out, &activeWindow)
+	// writToTestFile(activeWindow, pid)
+	if err != nil {
+		log.Fatal(err)
+		return false
+	}
+
+	if activeWindow.Pid == pid {
+		return true
+	}
+
+	return false
+}
+
+func writToTestFile(window types.HyprlandActiveWindow, pid int) {
+	f, err := os.OpenFile("testhypraw.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	_, err = fmt.Fprintf(f, "pid: %d, window: %v", pid, window)
+	if err != nil {
+		log.Fatal(err)
+	}
 }

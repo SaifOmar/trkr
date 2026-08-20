@@ -27,6 +27,7 @@ type Session struct {
 	ProcessID uint          `json:"process_id"`
 	Duration  time.Duration `json:"duration"`
 	Proc      *Process      `json:"proc,omitempty" gorm:"foreignKey:ProcessID;references:ID"`
+	Status    int           `json:"status"`
 }
 
 type Process struct {
@@ -56,4 +57,37 @@ type Event struct {
 type SessionEvent struct {
 	Session   *Session
 	EventType // start, end, pause, resume
+}
+
+type HyprlandActiveWindow struct {
+	Address   string `json:"address"`
+	Mapped    bool   `json:"mapped"`
+	Hidden    bool   `json:"hidden"`
+	At        [2]int `json:"at"`
+	Size      [2]int `json:"size"`
+	Workspace struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"workspace"`
+	Monitor         int      `json:"monitor"`
+	MonitorID       int      `json:"monitorID"`
+	Class           string   `json:"class"`
+	Title           string   `json:"title"`
+	InitialClass    string   `json:"initialClass"`
+	InitialTitle    string   `json:"initialTitle"`
+	Pid             int      `json:"pid"`
+	Xwayland        bool     `json:"xwayland"`
+	Pinned          bool     `json:"pinned"`
+	Fullscreen      int      `json:"fullscreen"`
+	FullscreenMode  int      `json:"fullscreenMode"`
+	FakeFullscreen  bool     `json:"fakeFullscreen"`
+	Group           []string `json:"group"`
+	Tags            []string `json:"tags"`
+	Swallowing      string   `json:"swallowing"`
+	FocusHistoryID  int      `json:"focusHistoryID"`
+	InhibitingIdle  bool     `json:"inhibitingIdle"`
+	ForeignToplevel struct {
+		// fields depend on Hyprland version
+	} `json:"foreign_toplevel"`
+	GroupedBy []string `json:"groupedBy"`
 }

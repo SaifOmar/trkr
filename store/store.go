@@ -110,7 +110,7 @@ func (s *Store) DeleteProcess(id uint) {
 
 func (s *Store) GetAllSession() []*types.Session {
 	var sessions []*types.Session
-	s.DB.Preload("Proc").Find(&sessions)
+	s.DB.Preload("Proc").Order("start_time desc").Find(&sessions)
 	return sessions
 }
 
